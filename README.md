@@ -1,102 +1,112 @@
 # CatBench
-CatBench: Benchmark Framework of Machine Learning Interatomic Potentials in Adsorption Energy Predictions
+
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/JinukMoon/CatBench)
+
+**CatBench: Benchmark framework of Machine Learning Interatomic Potentials for Adsorption Energy Predictions in Heterogeneous Catalysis**
+
+CatBench provides a unified framework for evaluating MLIP performance across diverse catalytic systems, offering automated data processing, calculation workflows, and comprehensive analysis tools for adsorption energies, surface energies, bulk formation energies, and equation of state properties.
+
+If you want to use MLIPs in your catalysis research, CatBench enables you to establish quantitative reliability through systematic benchmarking against DFT references.
+
+## Quick Navigation
+
+- [Installation](#installation)
+- [Overview](#overview)
+- [Adsorption Energy Benchmarking](#adsorption-energy-benchmarking)
+- [Relative Energy Benchmarking](#relative-energy-benchmarking)
+  - [Surface Energy](#surface-energy)
+  - [Bulk Formation Energy](#bulk-formation-energy)
+- [Equation of State (EOS) Benchmarking](#equation-of-state-eos-benchmarking)
+- [Configuration Options](#configuration-options)
+- [Citation](#citation)
 
 ## Installation
 
 ```bash
+# Basic installation (core features only)
 pip install catbench
+
+# With D3 dispersion correction support (requires CUDA)
+pip install catbench[d3]
+
+# Development installation
+git clone https://github.com/JinukMoon/CatBench.git
+cd CatBench
+pip install -e .
+
+# Development with D3 support
+pip install -e .[d3]
 ```
+
+### Installation Options
+
+- **Basic**: Core benchmarking features without dispersion correction
+- **[d3]**: Includes PyTorch for GPU-accelerated D3 dispersion correction
+
+> **Note**: D3 dispersion correction requires CUDA toolkit for GPU acceleration. CPU-only mode is not currently supported.
 
 ## Overview
+
 ![CatBench Schematic](assets/CatBench_Schematic.png)
-CatBench is a comprehensive benchmark framework designed to evaluate Machine Learning Interatomic Potentials (MLIPs) for adsorption energy or other reaction energy predictions. It provides tools for data processing, model evaluation, and result analysis.
 
-## Usage Workflow
+CatBench follows a three-step workflow for comprehensive MLIP evaluation:
 
-### 1. Data Processing
-CatBench supports two types of data sources:
-- A. Direct from Catalysis-Hub
-- B. User-calculated VASP Dataset
+1. **Data Processing**: Automated download from CatHub or processing of user VASP calculations
+2. **Calculation**: MLIP-based energy calculations with optional D3 dispersion correction
+3. **Analysis**: Statistical evaluation, anomaly detection, and visualization
 
-#### A. Direct from Catalysis-Hub
+## Adsorption Energy Benchmarking
 
-```python
-# Import the catbench package
-import catbench
+### Data Preparation
 
-# Process data from Catalysis-Hub
-# Single tag
-catbench.cathub_preprocess("Catalysis-Hub_Dataset_tag")
+#### Option A: CatHub Database
 
-# Multiple tags
-catbench.cathub_preprocess(["Catalysis-Hub_Dataset_tag1", "Catalysis-Hub_Dataset_tag2"])
-```
-
-**Example:**
-```python
-# Single tag example
-catbench.cathub_preprocess("AraComputational2022")
-
-# Multiple tags example
-catbench.cathub_preprocess(["AraComputational2022", "AlonsoStrain2023"])
-```
-
-When combining multiple benchmarks, the same adsorbate species might be recognized differently due to variations in naming conventions across different datasets (e.g., *HO vs *OH for hydroxyl group). To address this issue, you can use the `adsorbate_integration` parameter to unify these different naming conventions. If no integration is needed, you can simply use the benchmark_name parameter alone:
+Download and preprocess catalysis reaction data directly from CatHub:
 
 ```python
-# When no integration is needed, just use benchmark_name
-catbench.cathub_preprocess(["Catalysis-Hub_Dataset_tag1", "Catalysis-Hub_Dataset_tag2"])
+from catbench.adsorption import cathub_preprocessing
 
-# When integration is needed
-catbench.cathub_preprocess(
-    ["Catalysis-Hub_Dataset_tag1", "Catalysis-Hub_Dataset_tag2"],
-    adsorbate_integration={'HO': 'OH'}
-)
+# Single benchmark dataset
+cathub_preprocessing("MamunHighT2019")
 
-# You can add multiple integration pairs
-catbench.cathub_preprocess(
-    ["Catalysis-Hub_Dataset_tag1", "Catalysis-Hub_Dataset_tag2"],
-    adsorbate_integration={
-        'HO': 'OH',
-        'O2H': 'OOH',
-        'CO2H': 'COOH'
-    }
+# Multiple datasets with adsorbate name integration
+cathub_preprocessing(
+    ["MamunHighT2019", "AraComputational2022"],
+    adsorbate_integration={'HO': 'OH', 'O2H': 'OOH'}  # Unify naming conventions
 )
 ```
 
-#### B. User-calculated VASP Dataset
-For CatBench simulation on your VASP datasets, prepare your data hierarchy as follows:
+#### Option B: User VASP Data
 
-The data structure should include:
-- Gas references (`gas/`) containing VASP output files for gas phase molecules
-  - Note: Gas molecule folders must end with 'gas' (e.g., `H2gas/`, `H2Ogas/`)
-- Surface systems (`system1/`, `system2/`, etc.) containing:
-  - Each system represents a collection of reaction energies based on the same slab (e.g., `system1/` for Pt111, `system2/` for Ni111)
-  - Clean slab calculations (`slab/`)
-  - Adsorbate-surface systems organized by adsorbate type (`H/`, `OH/`, etc.)
-    - Under each adsorbate directory, you can create subdirectories with any names to represent different configurations
-    - Each configuration directory should contain the VASP output files
+> ⚠️ **Important**: The VASP preprocessing functions will DELETE all files except CONTCAR and OSZICAR to save disk space. **Always work with a copy of your original VASP data!**
 
-Important Notes:
-1. Each directory must contain CONTCAR and OSZICAR files. Note that other VASP output files will be deleted during processing, so please ensure your original files are preserved.
-2. When using `process_output` function, it will automatically clean up (delete) all files except CONTCAR and OSZICAR. Therefore, it is strongly recommended to:
-   - Keep your original data folder untouched
-   - Create a copy of your data folder
-   - Run `process_output` on the copied folder
-3. When benchmarking on user dataset, you must set `rate=0` in `execute_benchmark` function to preserve the original atomic constraints from your calculations.
+```bash
+# STRONGLY RECOMMENDED: Copy your original data first
+cp -r original_vasp_data/ data_for_catbench/
+```
+
+Organize your VASP calculation folders following this hierarchy:
 
 ```
-data/
+data_for_catbench/
 ├── gas/
-│   ├── H2gas/
-│   │   ├── CONTCAR
-│   │   ├── OSZICAR
-│   │   └── ...
+│   ├── H2gas/            # Complete VASP calculation folder
+│   │   ├── INCAR
+│   │   ├── POSCAR
+│   │   ├── POTCAR
+│   │   ├── KPOINTS
+│   │   ├── CONTCAR      # Required
+│   │   ├── OSZICAR      # Required
+│   │   ├── OUTCAR
+│   │   ├── vasprun.xml
+│   │   └── ...          # All other VASP files
 │   └── H2Ogas/
 │       ├── CONTCAR
 │       ├── OSZICAR
 │       └── ...
-├── system1/ (e.g., Pt111/)
+├── system1/  # e.g., Pt111
 │   ├── slab/
 │   │   ├── CONTCAR
 │   │   ├── OSZICAR
@@ -114,288 +124,704 @@ data/
 │       ├── 1/
 │       │   ├── CONTCAR
 │       │   ├── OSZICAR
-│   │   └── ...
+│       │   └── ...
 │       └── 2/
 │           ├── CONTCAR
 │           ├── OSZICAR
 │           └── ...
-└── system2/ (e.g., Ni111/)
-    ├── slab/
+└── system2/  # e.g., Ni111
+    └── ...
+```
+
+Process the data with coefficient settings:
+
+```python
+from catbench.adsorption import process_output, vasp_preprocessing
+
+# Define reaction stoichiometry
+coeff_setting = {
+    "H": {
+        "slab": -1,      # E(slab)
+        "adslab": 1,     # E(H*)
+        "H2gas": -1/2,   # -1/2 E(H2)
+    },
+    "OH": {
+        "slab": -1,      
+        "adslab": 1,     
+        "H2gas": +1/2,   
+        "H2Ogas": -1,    
+    },
+}
+
+# Process and prepare data
+process_output("data_for_catbench", coeff_setting)  # Cleans directories, keeps only CONTCAR/OSZICAR
+vasp_preprocessing("data_for_catbench")
+
+# Output: Creates raw_data/data_for_catbench_adsorption.json with all processed data
+```
+
+After processing:
+- All VASP files except CONTCAR and OSZICAR are deleted (saves disk space)
+- Data is stored in `raw_data/{dataset_name}_adsorption.json`
+- Original folder structure is preserved but cleaned
+
+### Calculation
+
+#### Basic Calculation
+
+```python
+from catbench.adsorption import AdsorptionCalculation
+from your_mlip import YourCalculator
+
+# Initialize calculators for reproducibility testing
+calc_num = 3  # Number of independent calculations
+calculators = []
+for i in range(calc_num):
+    calc = YourCalculator(...)  # Your MLIP with desired settings
+    calculators.append(calc)
+
+# Configure and run (only required parameters shown)
+config = {
+    "mlip_name": "YourMLIP",
+    "benchmark": "dataset_name",
+}
+
+adsorption_calc = AdsorptionCalculation(calculators, **config)
+adsorption_calc.run()
+```
+
+#### With D3 Dispersion Correction
+
+```python
+from catbench.adsorption import AdsorptionCalculation
+from catbench.dispersion import DispersionCorrection
+from your_mlip import YourCalculator
+
+# Setup D3 correction (using default PBE parameters)
+d3_corr = DispersionCorrection()
+
+# Apply D3 to calculators
+calc_num = 3
+calculators = []
+for i in range(calc_num):
+    calc = YourCalculator(...)  # Your MLIP with desired settings
+    calc_d3 = d3_corr.apply(calc)  # Combine MLIP with D3
+    calculators.append(calc_d3)
+
+# Run calculation
+config = {
+    "mlip_name": "YourMLIP_D3",
+    "benchmark": "dataset_name",
+}
+adsorption_calc = AdsorptionCalculation(calculators, **config)
+adsorption_calc.run()
+```
+
+#### OC20 Mode (Direct Adsorption Energy Prediction)
+
+For MLIPs trained on OC20 dataset that directly predict adsorption energies:
+
+```python
+from catbench.adsorption import AdsorptionCalculation
+from your_oc20_mlip import OC20Calculator  # Your OC20-trained MLIP
+
+# OC20-trained models (directly predict adsorption energies)
+calc_num = 3
+calculators = []
+for i in range(calc_num):
+    oc20_calculator = OC20Calculator(...)  # Your OC20 MLIP with desired settings
+    calculators.append(oc20_calculator)
+
+# Run in OC20 mode
+config = {
+    "mlip_name": "OC20_MLIP",
+    "benchmark": "dataset_name",
+}
+adsorption_calc = AdsorptionCalculation(calculators, mode="oc20", **config)
+adsorption_calc.run()
+```
+
+### Analysis
+
+```python
+from catbench.adsorption import AdsorptionAnalysis
+
+# Analyze results (all parameters optional, auto-detects MLIPs)
+analysis = AdsorptionAnalysis()
+analysis.analysis()
+```
+
+This generates:
+- **Parity plots**: Visual comparison of MLIP vs DFT energies
+- **Excel report**: Comprehensive metrics including MAE, RMSE, anomaly statistics
+- **Anomaly detection**: Automatic identification of problematic calculations
+
+You can freely analyze specific adsorbates and MLIPs, and customize various options including parity plot appearance and font sizes through [configuration options](#adsorptionanalysis).
+
+### Threshold Sensitivity Analysis
+
+Evaluate how different threshold values affect anomaly detection:
+
+```python
+from catbench.adsorption import AdsorptionAnalysis
+
+analysis = AdsorptionAnalysis()
+
+# Run both threshold sensitivity analyses automatically (default)
+analysis.threshold_sensitivity_analysis()
+
+# Or specify a specific mode if needed
+analysis.threshold_sensitivity_analysis(mode="disp_thrs")  # Only displacement threshold
+analysis.threshold_sensitivity_analysis(mode="bond_length_change_threshold")  # Only bond length threshold
+```
+
+This generates stacked area charts showing how anomaly detection rates change with different threshold values, helping you optimize threshold parameters for your specific system. By default, both displacement and bond length threshold analyses are performed automatically.
+
+### Output Files
+
+```
+result/
+├── YourMLIP/
+│   ├── gases/           # Gas molecule calculations
+│   ├── log/             # Optimization logs
+│   ├── traj/            # Trajectory files
+│   ├── YourMLIP_result.json         # All calculation results
+│   ├── YourMLIP_gases.json          # Gas energies
+│   └── YourMLIP_anomaly_detection.json  # Anomaly flags
+└── plot/
+    ├── YourMLIP_parity.png           # Parity plots
+    └── comparison_all.png            # Multi-MLIP comparison
+```
+
+#### 1. Parity Plot Analysis
+
+CatBench generates comprehensive parity plots for visual assessment of MLIP performance:
+
+<div align="center">
+<table>
+<tr>
+<td><img src="assets/mono_plot.png" alt="Mono Plot" width="500"/></td>
+<td><img src="assets/multi_plot.png" alt="Multi Plot" width="500"/></td>
+</tr>
+<tr>
+<td align="center"><strong>Mono Plot</strong><br/>All adsorbates combined in single parity plot</td>
+<td align="center"><strong>Multi Plot</strong><br/>Separate parity plots for each adsorbate</td>
+</tr>
+</table>
+</div>
+
+#### 2. Comprehensive Excel Analysis
+
+The `{current_directory}_Benchmarking_Analysis.xlsx` file provides detailed performance metrics across multiple sheets:
+
+##### **Main Performance Comparison**
+MLIP-to-MLIP performance overview with key metrics (showing 12 benchmarked MLIPs):
+
+| MLIP_name | Normal rate (%) | Anomaly rate (%) | MAE_total (eV) | MAE_normal (eV) | ADwT (%) | AMDwT (%) |
+|-----------|----------------|------------------|----------------|-----------------|----------|-----------|
+| MLIP_A | 77.25 | 14.39 | 1.118 | 0.316 | 77.98 | 84.71 |
+| MLIP_B | 74.22 | 16.84 | 0.667 | 0.512 | 69.66 | 80.80 |
+| MLIP_C | 80.18 | 13.51 | 0.917 | 0.241 | 78.97 | 86.79 |
+| MLIP_D | 73.20 | 16.26 | 0.738 | 0.413 | 71.27 | 81.03 |
+| MLIP_E | 78.45 | 12.87 | 0.892 | 0.298 | 76.15 | 83.92 |
+| ... | ... | ... | ... | ... | ... | ... |
+
+*This enables direct performance comparison across all benchmarked MLIPs*
+
+##### **Anomaly Analysis Sheet**
+Detailed breakdown of calculation anomalies by category:
+
+| MLIP_name | Normal | Adsorbate Migration | Energy Anomaly | Unphysical Relaxation | Reproduction Failure |
+|-----------|--------|-------------------|----------------|----------------------|-------------------|
+| MLIP_A | 34,869 | 3,774 | 590 | 3,845 | 2,052 |
+| MLIP_B | 33,503 | 4,035 | 834 | 5,221 | 1,537 |
+| MLIP_C | 36,178 | 2,847 | 1,334 | 3,671 | 1,100 |
+| MLIP_D | 33,025 | 4,759 | 956 | 5,372 | 1,018 |
+| ... | ... | ... | ... | ... | ... |
+
+*This helps identify systematic issues and reliability patterns across all MLIPs*
+
+##### **Individual MLIP Sheets** 
+Adsorbate-specific performance for each MLIP (example from MLIP_A sheet):
+
+| Adsorbate | Normal_count | Anomaly_count | MAE_normal (eV) | MAE_total (eV) |
+|-----------|-------------|---------------|-----------------|----------------|
+| H | 1,247 | 89 | 0.234 | 0.891 |
+| OH | 1,156 | 124 | 0.298 | 1.045 |
+| O | 1,089 | 156 | 0.387 | 1.234 |
+| CO | 978 | 203 | 0.445 | 1.567 |
+| NH3 | 892 | 167 | 0.512 | 1.789 |
+| ... | ... | ... | ... | ... |
+
+*Each of the 12 MLIPs has its own sheet revealing adsorbate-specific strengths and weaknesses*
+
+#### 3. Threshold Sensitivity Analysis
+
+CatBench provides automated threshold sensitivity analysis to optimize anomaly detection parameters:
+
+<div align="center">
+<table>
+<tr>
+<td><img src="assets/disp_thrs_sensitivity.png" alt="Displacement Threshold Sensitivity" width="500"/></td>
+<td><img src="assets/bond_threshold_sensitivity.png" alt="Bond Length Threshold Sensitivity" width="500"/></td>
+</tr>
+<tr>
+<td align="center"><strong>Displacement Threshold Analysis</strong><br/>Impact of displacement threshold on anomaly detection rates</td>
+<td align="center"><strong>Bond Length Threshold Analysis</strong><br/>Impact of bond length change threshold on anomaly detection rates</td>
+</tr>
+</table>
+</div>
+
+*These stacked area charts help optimize threshold parameters for your specific catalytic systems*
+
+#### 4. Additional Analysis Features
+
+- **Timing Analysis**: Computational efficiency metrics and performance scaling
+- **Reproducibility Testing**: Multiple calculator runs ensure numerical stability  
+- **Statistical Metrics**: MAE, RMSE, R², ADwT, and AMDwT for comprehensive evaluation
+
+## Relative Energy Benchmarking
+
+CatBench supports two main types of relative energy calculations: surface energy and bulk formation energy.
+
+### Surface Energy
+
+#### Data Preparation
+
+> ⚠️ **Important**: Always work with a copy of your VASP data. The preprocessing function will delete all files except CONTCAR and OSZICAR.
+
+```
+surface_data/
+├── Pt/                    # Material 1
+│   ├── bulk/
+│   │   ├── CONTCAR
+│   │   ├── OSZICAR
+│   │   └── ...
+│   └── surfaces/
+│       ├── 100/
+│       │   ├── CONTCAR
+│       │   ├── OSZICAR
+│       │   └── ...
+│       ├── 110/
+│       │   ├── CONTCAR
+│       │   ├── OSZICAR
+│       │   └── ...
+│       └── 111/
+│           ├── CONTCAR
+│           ├── OSZICAR
+│           └── ...
+├── Ni/                    # Material 2
+│   ├── bulk/
+│   │   ├── CONTCAR
+│   │   ├── OSZICAR
+│   │   └── ...
+│   └── surfaces/
+│       ├── 100/
+│       │   ├── CONTCAR
+│       │   ├── OSZICAR
+│       │   └── ...
+│       └── 111/
+│           ├── CONTCAR
+│           ├── OSZICAR
+│           └── ...
+└── Cu/                    # Material 3
+    ├── bulk/
     │   ├── CONTCAR
     │   ├── OSZICAR
     │   └── ...
-    ├── H/
-    │   ├── 1/
-    │   │   ├── CONTCAR
-    │   │   ├── OSZICAR
-    │   │   └── ...
-    │   └── 2/
-    │       ├── CONTCAR
-    │       ├── OSZICAR
-    │       └── ...
-    └── OH/
-        ├── 1/
-        │   ├── CONTCAR
-        │   ├── OSZICAR
-        │   └── ...
-        └── 2/
+    └── surfaces/
+        └── 111/
             ├── CONTCAR
             ├── OSZICAR
             └── ...
 ```
 
-Then process using:
+```python
+from catbench.relative.surface_energy.data import surface_energy_vasp_preprocessing
+
+# Process surface energy data
+surface_energy_vasp_preprocessing("surface_data")
+# Output: Creates raw_data/surface_data_surface.json
+```
+
+#### Calculation
 
 ```python
-import catbench
+from catbench.relative import SurfaceEnergyCalculation
+from your_mlip import YourCalculator
 
-# Define coefficients for calculating adsorption energies
-# For each adsorbate, specify coefficients based on the reaction equation:
-# Example for H*: 
-#   E_ads(H*) = E(H*) - E(slab) - 1/2 E(H2_gas)
-# Example for OH*:
-#   E_ads(OH*) = E(OH*) - E(slab) + 1/2 E(H2_gas) - E(H2O_gas)
+calc = YourCalculator(...)  # Your MLIP with desired settings
 
+surface_calc = SurfaceEnergyCalculation(
+    calculator=calc,
+    mlip_name="YourMLIP",
+    benchmark="surface_benchmark"
+)
+surface_calc.run()
+```
+
+#### Analysis
+
+```python
+from catbench.relative import RelativeEnergyAnalysis
+
+# Analyze surface energy results
+analysis = RelativeEnergyAnalysis(
+    task_type="surface",  # Required: "surface", "bulk_formation", or "custom"
+    benchmark="surface_benchmark"
+)
+analysis.analysis()
+```
+
+#### Output Files
+
+```
+result/
+├── YourMLIP/
+│   ├── YourMLIP_surface_benchmark.json  # Calculation results
+│   └── YourMLIP_surface_benchmark.xlsx  # Excel report
+└── plot/
+    └── YourMLIP/
+        ├── surface_parity.png           # Parity plot
+        └── surface_comparison.png        # Multi-MLIP comparison
+```
+
+### Bulk Formation Energy
+
+#### Data Preparation
+
+```
+formation_data/
+├── bulk_compounds/
+│   ├── NiO/
+│   │   ├── CONTCAR
+│   │   └── OSZICAR
+│   └── Fe2O3/
+│       ├── CONTCAR
+│       └── OSZICAR
+└── elements/
+    ├── Ni/
+    │   ├── CONTCAR
+    │   └── OSZICAR
+    ├── Fe/
+    │   ├── CONTCAR
+    │   └── OSZICAR
+    └── O/
+        ├── CONTCAR
+        └── OSZICAR
+```
+
+```python
+from catbench.relative.bulk_formation.data import vasp_preprocessing
+
+# Define formation reaction stoichiometry
 coeff_setting = {
-    "H": {
-        "slab": -1,      # Coefficient for clean surface
-        "adslab": 1,     # Coefficient for adsorbate-surface system
-        "H2gas": -1/2,   # Coefficient for H2 gas reference
+    "NiO": {
+        "bulk": 1,      # NiO
+        "Ni": -1,       # -Ni
+        "O": -1/2,      # -1/2 O2
     },
-    "OH": {
-        "slab": -1,      # Coefficient for clean surface
-        "adslab": 1,     # Coefficient for adsorbate-surface system
-        "H2gas": +1/2,   # Coefficient for H2 gas reference
-        "H2Ogas": -1,    # Coefficient for H2O gas reference
+    "Fe2O3": {
+        "bulk": 1,      # Fe2O3
+        "Fe": -2,       # -2Fe
+        "O": -3/2,      # -3/2 O2
     },
 }
 
-# This will clean up directories and keep only CONTCAR and OSZICAR files
-catbench.process_output("data", coeff_setting)
-catbench.userdata_preprocess("data")
+vasp_preprocessing("formation_data", coeff_setting)
 ```
 
-The coefficient setting allows flexible definition of reaction energies, enabling benchmarking of various types of reactions beyond adsorption.
-
-For example, you can benchmark the prediction performance for oxygen vacancy formation energy as follows:
+#### Calculation
 
 ```python
-# Example: Oxygen vacancy formation energy calculation
-coeff_setting = {
-    "Ov": {
-        "slab": -1,        # Coefficient for clean surface
-        "adslab": 1,       # Coefficient for slab with oxygen vacancy
-        "O2gas": 1/2,      # Coefficient for O2 gas reference (vacancy formation)
-    }
-}
+from catbench.relative import BulkFormationCalculation
+from your_mlip import YourCalculator
 
-# This will clean up directories and keep only CONTCAR and OSZICAR files
-catbench.process_output("data", coeff_setting)
-catbench.userdata_preprocess("data")
+calc = YourCalculator(...)  # Your MLIP with desired settings
+
+formation_calc = BulkFormationCalculation(
+    calculator=calc,
+    mlip_name="YourMLIP",
+    benchmark="formation_benchmark"
+)
+formation_calc.run()
 ```
 
-### 2. Execute Benchmark
-
-#### A. General Benchmark
-This is a general benchmark setup. The `range()` value determines the number of repetitions for reproducibility testing. If reproducibility testing is not needed, it can be set to 1.
-
-Note: This benchmark is only compatible with MLIP models that output total system energy. For example, OC20 MLIP models that are trained to directly predict adsorption energies cannot be used with this framework.
+#### Analysis
 
 ```python
-import catbench
-from your_calculator import your_MLIP_Calculator
+from catbench.relative import RelativeEnergyAnalysis
 
-# Prepare calculator list
-
-calc_num = 5 # Number of calculations for reproducibility testing. Can be adjusted based on available computational resources.
-
-calculators = []
-print("Calculators Initializing...")
-for i in range(calc_num):
-    print(f"{i}th calculator")
-    calc = your_MLIP_Calculator(...)
-    calculators.append(calc)
-
-config = {
-    "MLIP_name": "your MLIP name", # Required: Name of your MLIP model (e.g., "MACE", "CHGNet", "UMA", "yourmodel_w_dataset1", "yourmodel_tuned_1"). You can use any abbreviation that identifies your model.
-    "benchmark": "your benchmark dataset pkl name", # Required: Name of the .pkl file in the raw_data directory
-    "rate": 0.5, # Optional: For cathub data, can be any value. For user VASP data, must be set to 0
-    ... # For detailed configuration options, see the Configuration Options section at the bottom of this document.
-}
-
-catbench.execute_benchmark(calculators, **config)
+# Analyze bulk formation energy results
+analysis = RelativeEnergyAnalysis(
+    task_type="bulk_formation",
+    benchmark="formation_benchmark"
+)
+analysis.analysis()
 ```
 
-After execution, the following files and directories will be created:
+#### Output Files
 
-1. A `result` directory is created to store all calculation outputs.
-2. Inside the `result` directory, subdirectories are created for each MLIP.
-3. Each MLIP's subdirectory contains:
-   - `gases/`: Gas reference molecules for adsorption energy calculations
-   - `log/`: Slab and adslab calculation logs
-   - `traj/`: Slab and adslab trajectory files
-   - `{MLIP_name}_gases.json`: Gas molecules energies
-   - `{MLIP_name}_anomaly_detection.json`: Anomaly detection status for each adsorption data
-   - `{MLIP_name}_result.json`: Raw data (energies, calculation times, anomaly detection, slab displacements, etc.)
+```
+result/
+├── YourMLIP/
+│   ├── YourMLIP_formation_benchmark.json  # Calculation results
+│   └── YourMLIP_formation_benchmark.xlsx  # Excel report
+└── plot/
+    └── YourMLIP/
+        ├── formation_parity.png           # Parity plot
+        └── formation_comparison.png        # Multi-MLIP comparison
+```
 
-#### B. OC20 MLIP Benchmark
-Since OC20 project MLIP models are trained to predict adsorption energies directly rather than total energies, they are handled with a separate function.
+## Equation of State (EOS) Benchmarking
+
+### Data Preparation
+
+> ⚠️ **Important**: Always work with a copy of your VASP data. The preprocessing function will delete all files except CONTCAR and OSZICAR.
+
+EOS data requires multiple volume points for each material:
+
+```
+eos_data/
+├── Pt/                    # Material 1
+│   ├── 0/                 # Volume point 0 (smallest)
+│   │   ├── CONTCAR
+│   │   └── OSZICAR
+│   ├── 1/
+│   │   ├── CONTCAR
+│   │   └── OSZICAR
+│   ├── ...
+│   └── 10/                # Volume point 10 (largest)
+│       ├── CONTCAR
+│       └── OSZICAR
+├── Ni/                    # Material 2
+│   ├── 0/
+│   │   ├── CONTCAR
+│   │   └── OSZICAR
+│   ├── 1/
+│   │   ├── CONTCAR
+│   │   └── OSZICAR
+│   └── ...
+└── Cu/                    # Material 3
+    ├── 0/
+    │   ├── CONTCAR
+    │   └── OSZICAR
+    └── ...
+```
+
+Each material folder contains subdirectories (0, 1, 2, ..., 10) representing different volume points for EOS fitting.
 
 ```python
-import catbench
-from your_calculator import your_MLIP_Calculator
+from catbench.eos import eos_vasp_preprocessing
 
-# Prepare calculator list
-
-calc_num = 5 # Number of calculations for reproducibility testing. Can be adjusted based on available computational resources.
-
-calculators = []
-print("Calculators Initializing...")
-for i in range(calc_num):
-    print(f"{i}th calculator")
-    calc = your_MLIP_Calculator(...)
-    calculators.append(calc)
-
-config = {
-    "MLIP_name": "your MLIP name", # Required: Name of your MLIP model (e.g., "MACE", "CHGNet", "UMA", "yourmodel_w_dataset1", "yourmodel_tuned_1"). You can use any abbreviation that identifies your model.
-    "benchmark": "your benchmark dataset pkl name", # Required: Name of the .pkl file in the raw_data directory
-    "rate": 0.5, # Optional: For cathub data, can be any value. For user VASP data, must be set to 0
-    ... # For detailed configuration options, see the Configuration Options section at the bottom of this document.
-}
-
-catbench.execute_benchmark_OC20(calculators, **config)
+eos_vasp_preprocessing("eos_data")
+# Output: Creates raw_data/eos_data_eos.json
 ```
 
-The overall usage is similar to the general benchmark, but each MLIP will only have the following subdirectories:
-
-- `log/`: Slab and adslab calculation logs
-- `traj/`: Slab and adslab trajectory files
-- `{MLIP_name}_anomaly_detection.json`: Anomaly detection status for each adsorption data
-- `{MLIP_name}_result.json`: Raw data (energies, calculation times, anomaly detection, slab displacements, etc.)
-
-#### C. Single-point Calculation Benchmark
+### Calculation
 
 ```python
-import catbench
-from your_calculator import your_MLIP_Calculator
+from catbench.eos import EOSCalculation
+from your_mlip import YourCalculator
 
-# Prepare calculator
+calc = YourCalculator(...)  # Your MLIP with desired settings
 
-print("Calculators Initializing...")
-calc = your_MLIP_Calculator(...)
-
-config = {
-    "MLIP_name": "your MLIP name", # Required: Name of your MLIP model (e.g., "MACE", "CHGNet", "UMA", "yourmodel_w_dataset1", "yourmodel_tuned_1"). You can use any abbreviation that identifies your model.
-    "benchmark": "your benchmark dataset pkl name", # Required: Name of the .pkl file in the raw_data directory
-    ... # For detailed configuration options, see the Configuration Options section at the bottom of this document.
-}
-catbench.execute_benchmark_single(calc, **config)
+eos_calc = EOSCalculation(
+    calculator=calc,
+    mlip_name="YourMLIP",
+    benchmark="eos_benchmark"
+)
+eos_calc.run()
 ```
 
-### 3. Analysis
+### Analysis
 
 ```python
-import catbench
+from catbench.eos import EOSAnalysis
 
-config = {
-    ... # For detailed configuration options, see the Configuration Options section at the bottom of this document.
-}
-catbench.analysis_MLIPs(**config)
+# Analyze results (auto-detects MLIPs if not specified)
+eos_analysis = EOSAnalysis()
+eos_analysis.analysis()
 ```
 
-The analysis function processes the calculation data stored in the `result` directory and generates:
+This provides:
+- **Bulk modulus comparison**: MLIP vs DFT
+- **Equilibrium volume accuracy**
+- **EOS curve fitting quality**
 
-1. A `plot/` directory:
-   - Parity plots for each MLIP model
-   - Combined parity plots for comparison
-   - Performance visualization plots
+### Output Files
 
-2. An Excel file `{directory_name}_Benchmarking_Analysis.xlsx`:
-   - Comprehensive performance metrics for all MLIP models
-   - Statistical analysis of predictions
-   - Model-specific details and parameters
-
-#### Single-point Calculation Analysis
-
-```python
-import catbench
-
-config = {
-    ... # For detailed configuration options, see the Configuration Options section at the bottom of this document.
-}
-catbench.analysis_MLIPs_single(**config)
+```
+result/
+├── YourMLIP/
+│   └── YourMLIP_eos_benchmark.json     # Calculation results
+└── plot/
+    └── YourMLIP/
+        ├── Pt_eos.png                   # Individual material EOS curves
+        ├── Ni_eos.png
+        ├── Cu_eos.png
+        └── eos_comparison.png           # Multi-MLIP comparison
 ```
 
-## Outputs
-
-### 1. Adsorption Energy Parity Plot (mono_version & multi_version)
-You can plot adsorption energy parity plots for each adsorbate across all MLIPs, either simply or by adsorbate.
-<p float="left">
-  <img src="assets/mono_plot.png" width="400" />
-  <img src="assets/multi_plot.png" width="400" />
-</p>
-
-### 2. Comprehensive Performance Table
-View various metrics for all MLIPs.
-![Comparison Table](assets/comparison_table.png)
-
-### 3. Anomaly Analysis
-See how anomalies are detected for all MLIPs.
-![Comparison Table](assets/anomaly_table.png)
-
-### 4. Analysis by Adsorbate
-Observe how each MLIP predicts for each adsorbate.
-![Comparison Table](assets/adsorbate_comp_table.png)
+The Excel report includes:
+- **Summary**: Bulk modulus and equilibrium volume metrics
+- **Material Details**: Per-material performance
+- **EOS Parameters**: Fitted curve parameters
+- **Raw Data**: Complete E-V data points
 
 ## Configuration Options
 
-### execute_benchmark / execute_benchmark_OC20
-| Option | Description | Default |
-|--------|-------------|---------|
-| MLIP_name | Name of your MLIP | Required |
-| benchmark | Name of benchmark dataset. Use "multiple_tag" for combined datasets, or specific tag name for single dataset | Required |
-| F_CRIT_RELAX | Force convergence criterion | 0.05 |
-| N_CRIT_RELAX | Maximum number of steps | 999 |
-| rate | Fix ratio for surface atoms (0: use original constraints, >0: fix atoms from bottom up to specified ratio) | 0.5 |
-| disp_thrs_slab | Displacement threshold for slab | 1.0 |
-| disp_thrs_ads | Displacement threshold for adsorbate | 1.5 |
-| again_seed | Seed variation threshold | 0.2 |
-| damping | Damping factor for optimization | 1.0 |
-| gas_distance | Cell size for gas molecules (if a number is provided, it sets the cell size as a cube with that length (Å)) | False |
-| optimizer | Optimization algorithm | "LBFGS" |
-| restart | Set to True when resuming interrupted calculations. | False |
+### AdsorptionCalculation
 
+| Parameter | Description | Type | Default |
+|-----------|-------------|------|---------|
+| `mlip_name` | Name identifier for the MLIP | str | Required |
+| `benchmark` | Dataset name or "multiple_tag" for combined | str | Required |
+| `mode` | Calculation mode: "basic" or "oc20" | str | "basic" |
+| `f_crit_relax` | Force convergence criterion (eV/Å) | float | 0.05 |
+| `n_crit_relax` | Maximum optimization steps | int | 999 |
+| `rate` | Fraction of atoms to fix (0: use original) | float | 0.5 |
+| `damping` | Optimization damping factor | float | 1.0 |
+| `optimizer` | ASE optimizer: "LBFGS", "BFGS", "FIRE" | str | "LBFGS" |
+| `save_step` | Save interval for checkpointing | int | 50 |
 
-### execute_benchmark_single
-| Option | Description | Default |
-|--------|-------------|---------|
-| MLIP_name | Name of your MLIP | Required |
-| benchmark | Name of benchmark dataset. Use "multiple_tag" for combined datasets, or specific tag name for single dataset | Required |
-| gas_distance | Cell size for gas molecules (if a number is provided, it sets the cell size as a cube with that length (Å)) | False |
-| optimizer | Optimization algorithm for gas molecule relaxation | "LBFGS" |
-| restart | Set to True when resuming interrupted calculations. | False |
+### AdsorptionAnalysis
 
-### analysis_MLIPs
-| Option | Description | Default |
-|--------|-------------|---------|
-| Benchmarking_name | Name for output files | Current directory name |
-| calculating_path | Path to result directory | "./result" |
-| MLIP_list | List of MLIPs to analyze | All MLIPs in result directory |
-| target_adsorbates | Target adsorbates to analyze | All adsorbates |
-| specific_color | Color for plots | "black" |
-| min | Axis minimum | Auto-calculated |
-| max | Axis maximum | Auto-calculated |
-| figsize | Figure size | (9, 8) |
-| mark_size | Marker size | 100 |
-| linewidths | Line width | 1.5 |
-| dpi | Plot resolution | 300 |
-| legend_off | Toggle legend | False |
-| error_bar_display | Toggle error bars | False |
-| font_setting | Font setting <br> (Eg: `["/Users/user/Library/Fonts/Helvetica.ttf", "sans-serif"]`) | False |
+| Parameter | Description | Type | Default |
+|-----------|-------------|------|---------|
+| `calculating_path` | Path to results directory | str | "./result" |
+| `mlip_list` | MLIPs to analyze | list[str] | Auto-detect |
+| `target_adsorbates` | Specific adsorbates to analyze | list[str] | All |
+| `exclude_adsorbates` | Adsorbates to exclude | list[str] | None |
+| `benchmarking_name` | Output file prefix | str | Current dir |
+| `disp_thrs` | Displacement threshold (Å) | float | 0.5 |
+| `energy_thrs` | Energy anomaly threshold (eV) | float | 2.0 |
+| `reproduction_thrs` | Reproducibility threshold (eV) | float | 0.2 |
+| `bond_length_change_threshold` | Bond length change threshold (fraction) | float | 0.2 |
+| `energy_cutoff` | Max reference energy to include (eV) | float | None |
+| `time_unit` | Time display unit: "s", "ms", "µs" | str | "s" |
+| `chemical_bond_cutoff` | Chemical bond cutoff distance (Å) | float | 6.0 |
+| **Plot Appearance** | | | |
+| `figsize` | Plot dimensions | tuple[int, int] | (9, 8) |
+| `dpi` | Plot resolution | int | 300 |
+| `mark_size` | Marker size in plots | int | 100 |
+| `linewidths` | Line width in plots | float | 1.5 |
+| `specific_color` | Color for monochrome plots | str | "#2077B5" |
+| **Plot Axes** | | | |
+| `min` | Minimum value for plot axes | float | None |
+| `max` | Maximum value for plot axes | float | None |
+| `x_tick_bins` | Number of x-axis tick bins | int | 5 |
+| `y_tick_bins` | Number of y-axis tick bins | int | 5 |
+| `tick_decimal_places` | Decimal places for tick labels | int | 1 |
+| `tick_labelsize` | Font size for tick labels | int | 25 |
+| **Font Sizes** | | | |
+| `xlabel_fontsize` | Font size for x-axis labels | int | 40 |
+| `ylabel_fontsize` | Font size for y-axis labels | int | 40 |
+| `mae_text_fontsize` | Font size for MAE text | int | 30 |
+| `legend_fontsize` | Legend font size | int | 25 |
+| `comparison_legend_fontsize` | Comparison plot legend font size | int | 15 |
+| **Display Options** | | | |
+| `legend_off` | Hide legends in plots | bool | False |
+| `mae_text_off` | Hide MAE text in plots | bool | False |
+| `error_bar_display` | Show error bars in plots | bool | False |
+| `xlabel_off` | Hide x-axis labels | bool | False |
+| `ylabel_off` | Hide y-axis labels | bool | False |
+| `grid` | Show grid on plots | bool | False |
+| `plot_enabled` | Generate plots | bool | True |
+| **Advanced** | | | |
+| `font_setting` | Custom font settings [family, path] | list[str] | False |
+| `mlip_name_map` | Dictionary for MLIP display names | dict[str, str] | {} |
 
+### DispersionCorrection
 
-## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+| Parameter | Description | Type | Default |
+|-----------|-------------|------|---------|
+| `damping_type` | Damping function: "damp_bj", "damp_zero" | str | "damp_bj" |
+| `functional_name` | DFT functional for parameters | str | "pbe" |
+| `vdw_cutoff` | van der Waals cutoff (au²) | int | 9000 |
+| `cn_cutoff` | Coordination number cutoff (au²) | int | 1600 |
+
+### SurfaceEnergyCalculation / BulkFormationCalculation
+
+| Parameter | Description | Type | Default |
+|-----------|-------------|------|---------|
+| `calculator` | ASE calculator instance | ASE Calculator | Required |
+| `mlip_name` | MLIP identifier | Required |
+| `benchmark` | Dataset name | Required |
+| `f_crit_relax` | Force convergence (eV/Å) | 0.05 |
+| `n_crit_relax` | Max steps | 999 |
+
+### RelativeEnergyAnalysis
+
+| Parameter | Description | Type | Default |
+|-----------|-------------|------|---------|
+| `calculating_path` | Path to results directory | str | "./result" |
+| `plot_path` | Path for plot output | str | "./plot" |
+| `benchmark` | Dataset name | str | Current dir name |
+| `task_type` | Analysis type: "surface", "bulk_formation", "custom" | str | Required |
+| `mlip_list` | MLIPs to analyze | list[str] | Auto-detect |
+| `figsize` | Plot dimensions | tuple[int, int] | (9, 8) |
+| `dpi` | Plot resolution | int | 300 |
+| `mark_size` | Marker size in plots | int | 100 |
+| `linewidths` | Line width in plots | float | 1.5 |
+| `specific_color` | Color for plots | str | "#2077B5" |
+| `min` | Minimum value for plot axes | float | None |
+| `max` | Maximum value for plot axes | float | None |
+| `font_setting` | Custom font settings | list[str] | False |
+
+### EOSCalculation
+
+| Parameter | Description | Type | Default |
+|-----------|-------------|------|---------|
+| `calculator` | ASE calculator instance | ASE Calculator | Required |
+| `mlip_name` | MLIP identifier | Required |
+| `benchmark` | Dataset name | Required |
+
+### EOSAnalysis
+
+| Parameter | Description | Type | Default |
+|-----------|-------------|------|---------|
+| `calculating_path` | Path to results directory | str | "./result" |
+| `plot_path` | Path for plot output | str | "./plot" |
+| `benchmark` | Dataset name | str | Current dir name |
+| `mlip_list` | MLIPs to analyze | list[str] | Auto-detect |
+| `figsize` | Plot dimensions | tuple[int, int] | (9, 8) |
+| `dpi` | Plot resolution | int | 300 |
+| `mark_size` | Marker size in plots | int | 100 |
+| `x_tick_bins` | Number of x-axis tick bins | int | 5 |
+| `y_tick_bins` | Number of y-axis tick bins | int | 5 |
+| `tick_decimal_places` | Decimal places for tick labels | int | 1 |
+| `tick_labelsize` | Font size for tick labels | int | 25 |
+| `xlabel_fontsize` | Font size for x-axis labels | int | 40 |
+| `ylabel_fontsize` | Font size for y-axis labels | int | 40 |
+| `legend_fontsize` | Legend font size | int | 25 |
+| `comparison_legend_fontsize` | Comparison plot legend font size | int | 15 |
+| `grid` | Show grid on plots | bool | False |
+| `font_setting` | Custom font settings | list[str] | False |
 
 ## Citation
-This work will be published soon.
+
+If you use CatBench in your research, please cite:
+
+```bibtex
+@article{catbench2025,
+  title={CatBench: Benchmark Framework of Machine Learning Interatomic Potentials for Adsorption Energy Predictions in Heterogeneous Catalysis},
+  author={Moon, Jinuk and Jeon, Uchan and Choung, Seokhyun and Han, Jeong Woo},
+  journal={Cell Reports Physical Science},
+  year={2025},
+  note={In revision}
+}
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contact
+
+**Jinuk Moon** - [jumoon@snu.ac.kr](mailto:jumoon@snu.ac.kr)  
+Seoul National University
+
+---
+
+For bug reports, feature requests, and contributions, visit our [GitHub repository](https://github.com/JinukMoon/CatBench).
