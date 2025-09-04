@@ -732,10 +732,9 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `disp_thrs` | Displacement threshold (Å) | float | 0.5 |
 | `energy_thrs` | Energy anomaly threshold (eV) | float | 2.0 |
 | `reproduction_thrs` | Reproducibility threshold (eV) | float | 0.2 |
-| `bond_length_change_threshold` | Bond length change threshold (fraction) | float | 0.2 |
+| `bond_length_change_threshold` | Bond length change threshold for anomaly detection (fraction) | float | 0.2 |
 | `energy_cutoff` | Max reference energy to include (eV) | float | None |
 | `time_unit` | Time display unit: "s", "ms", "µs" | str | "s" |
-| `chemical_bond_cutoff` | Chemical bond cutoff distance (Å) | float | 6.0 |
 | **Plot Appearance** | | | |
 | `figsize` | Plot dimensions | tuple[int, int] | (9, 8) |
 | `dpi` | Plot resolution | int | 300 |
