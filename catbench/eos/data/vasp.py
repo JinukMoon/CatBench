@@ -10,6 +10,7 @@ import logging
 import io
 import numpy as np
 from ase.io import read, write
+from catbench.utils.data_utils import cleanup_vasp_files
 
 
 def eos_vasp_preprocessing(dataset_name, save_directory="raw_data"):
@@ -58,6 +59,10 @@ def eos_vasp_preprocessing(dataset_name, save_directory="raw_data"):
     
     if not os.path.exists(dataset_name):
         raise FileNotFoundError(f"Dataset directory not found: {dataset_name}")
+    
+    # Clean up unnecessary VASP files
+    logger.info("Cleaning up unnecessary VASP files (keeping CONTCAR and OSZICAR)...")
+    cleanup_vasp_files(dataset_name, keep_files=["CONTCAR", "OSZICAR"], verbose=True)
     
     eos_data = {}
     

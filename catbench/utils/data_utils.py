@@ -10,6 +10,7 @@ from typing import List, Set, Dict, Any
 import numpy as np
 import json
 import io
+import os
 from ase import Atoms
 from ase.io import write, read
 
@@ -124,6 +125,46 @@ def save_catbench_json(data_dict: Dict[str, Any], filepath: str) -> None:
         json.dump(json_data, f, indent=2)
     
     print(f"Data saved to {filepath}")
+
+
+def cleanup_vasp_files(directory: str, keep_files: List[str] = None, verbose: bool = True) -> None:
+    """
+    Clean up VASP output files, keeping only specified files.
+    
+    This function walks through a directory tree and removes all files except
+    those specified in keep_files. Commonly used to save disk space after
+    VASP calculations by keeping only essential files (CONTCAR, OSZICAR).
+    
+    Args:
+        directory: Root directory to clean up
+        keep_files: List of filenames to keep (default: ["CONTCAR", "OSZICAR"])
+        verbose: Print deleted files if True
+        
+    Example:
+        >>> cleanup_vasp_files("my_dataset/")
+        >>> cleanup_vasp_files("my_dataset/", keep_files=["CONTCAR", "OSZICAR", "OUTCAR"])
+    """
+    if keep_files is None:
+        keep_files = ["CONTCAR", "OSZICAR"]
+    
+    deleted_count = 0
+    for dirpath, dirnames, filenames in os.walk(directory):
+        # Check if this directory contains VASP output files
+        vasp_files = set(filenames)
+        if "OSZICAR" in vasp_files or "CONTCAR" in vasp_files:
+            # Delete files that are not in keep_files list
+            for file in filenames:
+                if file not in keep_files:
+                    file_path = os.path.join(dirpath, file)
+                    os.remove(file_path)
+                    if verbose:
+                        print(f"Deleted: {file_path}")
+                    deleted_count += 1
+    
+    if verbose and deleted_count > 0:
+        print(f"Total files deleted: {deleted_count}")
+    elif verbose:
+        print("No files to delete.")
 
 
 def load_catbench_json(filepath: str) -> Dict[str, Any]:

@@ -11,7 +11,7 @@ import logging
 import numpy as np
 from collections import Counter
 from ase.io import read
-from catbench.utils.data_utils import save_catbench_json
+from catbench.utils.data_utils import save_catbench_json, cleanup_vasp_files
 
 
 def bulk_formation_vasp_preprocessing(dataset_name, coeff_setting, save_directory="raw_data"):
@@ -72,6 +72,10 @@ def bulk_formation_vasp_preprocessing(dataset_name, coeff_setting, save_director
     
     if not os.path.exists(dataset_name):
         raise FileNotFoundError(f"Dataset directory not found: {dataset_name}")
+    
+    # Clean up unnecessary VASP files
+    logger.info("Cleaning up unnecessary VASP files (keeping CONTCAR and OSZICAR)...")
+    cleanup_vasp_files(dataset_name, keep_files=["CONTCAR", "OSZICAR"], verbose=True)
     
     target_dir = os.path.join(dataset_name, "target")
     reference_dir = os.path.join(dataset_name, "reference")

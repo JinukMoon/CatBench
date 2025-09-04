@@ -9,6 +9,7 @@ import os
 import json
 from ase.io import read
 from catbench.utils.io_utils import get_raw_data_directory, get_raw_data_path, save_json
+from catbench.utils.data_utils import cleanup_vasp_files
 
 
 def read_E0_from_OSZICAR(file_path):
@@ -56,33 +57,30 @@ def process_output(dataset_name, coeff_setting):
         dataset_name: Path to dataset directory
         coeff_setting: Dictionary containing coefficient settings for each reaction
     """
+    # Use unified cleanup function to remove unnecessary files
+    cleanup_vasp_files(dataset_name, keep_files=["OSZICAR", "CONTCAR"], verbose=True)
+    
+    # Add coefficient files where needed
     for dirpath, dirnames, filenames in os.walk(dataset_name):
-        # Check if both OSZICAR and CONTCAR files exist
         if "OSZICAR" in filenames and "CONTCAR" in filenames:
-            # Iterate through all files in the folder
-            for file in filenames:
-                # Delete files that are not OSZICAR or CONTCAR
-                if file not in ["OSZICAR", "CONTCAR"]:
-                    file_path = os.path.join(dirpath, file)
-                    os.remove(file_path)
-                    print(f"Deleted: {file_path}")
 
-            rxn_name = dirpath.split("/")[2]
+            rxn_name = dirpath.split("/")[2] if len(dirpath.split("/")) > 2 else None
+            
+            if rxn_name:
+                not_calc_dirs = [
+                    name
+                    for name in os.listdir(f"{dataset_name}/gas")
+                    if os.path.isdir(os.path.join(f"{dataset_name}/gas", name))
+                ] + ["slab"]
 
-            not_calc_dirs = [
-                name
-                for name in os.listdir(f"{dataset_name}/gas")
-                if os.path.isdir(os.path.join(f"{dataset_name}/gas", name))
-            ] + ["slab"]
+                if rxn_name not in not_calc_dirs:
+                    coeff = coeff_setting[rxn_name]
+                else:
+                    coeff = {}
 
-            if rxn_name not in not_calc_dirs:
-                coeff = coeff_setting[rxn_name]
-            else:
-                coeff = {}
-
-            coeff_path = os.path.join(dirpath, "coeff.json")
-            if not os.path.exists(coeff_path) and coeff != {}:
-                save_json(coeff, coeff_path, use_numpy_encoder=False)
+                coeff_path = os.path.join(dirpath, "coeff.json")
+                if not os.path.exists(coeff_path) and coeff != {}:
+                    save_json(coeff, coeff_path, use_numpy_encoder=False)
 
     for dir_name in os.listdir(dataset_name):
         dir_path = os.path.join(dataset_name, dir_name)

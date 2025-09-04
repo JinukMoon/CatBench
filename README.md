@@ -84,13 +84,13 @@ cathub_preprocessing(
 
 ```bash
 # STRONGLY RECOMMENDED: Copy your original data first
-cp -r original_vasp_data/ data_for_catbench/
+cp -r original_vasp_data/ your_dataset_name/
 ```
 
-Organize your VASP calculation folders following this hierarchy:
+Organize your VASP calculation folders following this hierarchy (folder name is customizable):
 
 ```
-data_for_catbench/
+your_dataset_name/  # You can use any name for this folder
 ├── gas/
 │   ├── H2gas/            # Complete VASP calculation folder
 │   │   ├── INCAR
@@ -153,10 +153,10 @@ coeff_setting = {
     },
 }
 
-# Process and prepare data (automatically cleans directories)
-vasp_preprocessing("data_for_catbench", coeff_setting)
+# Process and prepare data (use your actual folder name here)
+vasp_preprocessing("your_dataset_name", coeff_setting)  # Replace "your_dataset_name" with your actual folder name
 
-# Output: Creates raw_data/data_for_catbench_adsorption.json with all processed data
+# Output: Creates raw_data/{your_folder_name}_adsorption.json with all processed data
 ```
 
 After processing:
@@ -382,66 +382,52 @@ CatBench supports two main types of relative energy calculations: surface energy
 
 #### Data Preparation
 
-> ⚠️ **Important**: Always work with a copy of your VASP data. The preprocessing function will delete all files except CONTCAR and OSZICAR.
+> **Warning**: Preprocessing functions will DELETE all VASP files except CONTCAR and OSZICAR to save disk space. Always work with copies of your original data.
 
 ```
-surface_data/
+your_surface_data/  # You can use any name for this folder
 ├── Material_1/
 │   ├── bulk/
-│   │   ├── INCAR
-│   │   ├── POSCAR
-│   │   ├── POTCAR
-│   │   ├── KPOINTS
 │   │   ├── CONTCAR      # Required
 │   │   ├── OSZICAR      # Required
-│   │   ├── OUTCAR
-│   │   ├── vasprun.xml
-│   │   └── ...          # All other VASP files
-│   └── surfaces/
-│       ├── 100/
-│       │   ├── CONTCAR
-│       │   ├── OSZICAR
-│       │   └── ...
-│       ├── 110/
-│       │   ├── CONTCAR
-│       │   ├── OSZICAR
-│       │   └── ...
-│       └── 111/
-│           ├── CONTCAR
-│           ├── OSZICAR
-│           └── ...
+│   │   └── ...          # Other VASP files are preserved
+│   └── slab/
+│       ├── CONTCAR      # Required
+│       ├── OSZICAR      # Required
+│       └── ...          # Other VASP files are preserved
 ├── Material_2/
 │   ├── bulk/
 │   │   ├── CONTCAR
-│   │   ├── OSZICAR
-│   │   └── ...
-│   └── surfaces/
-│       ├── 100/
-│       │   ├── CONTCAR
-│       │   ├── OSZICAR
-│       │   └── ...
-│       └── 111/
-│           ├── CONTCAR
-│           ├── OSZICAR
-│           └── ...
-└── Material_3/
+│   │   └── OSZICAR
+│   └── slab/
+│       ├── CONTCAR
+│       └── OSZICAR
+├── Material_3/
+│   ├── bulk/
+│   │   ├── CONTCAR
+│   │   └── OSZICAR
+│   └── slab/
+│       ├── CONTCAR
+│       └── OSZICAR
+└── Material_4/
     ├── bulk/
     │   ├── CONTCAR
-    │   ├── OSZICAR
-    │   └── ...
-    └── surfaces/
-        └── 111/
-            ├── CONTCAR
-            ├── OSZICAR
-            └── ...
+    │   └── OSZICAR
+    └── slab/
+        ├── CONTCAR
+        └── OSZICAR
 ```
+
+Each material folder must contain:
+- `bulk/`: Bulk phase calculation
+- `slab/`: Surface slab calculation
 
 ```python
 from catbench.relative.surface_energy.data import surface_energy_vasp_preprocessing
 
-# Process surface energy data
-surface_energy_vasp_preprocessing("surface_data")
-# Output: Creates raw_data/surface_data_surface.json
+# Process surface energy data (use your actual folder name here)
+surface_energy_vasp_preprocessing("your_surface_data")  # Deletes extra VASP files
+# Output: Creates raw_data/{your_folder_name}_surface.json
 ```
 
 #### Calculation
@@ -506,8 +492,10 @@ The Excel report provides comprehensive surface energy analysis:
 
 #### Data Preparation
 
+> **Warning**: Preprocessing functions will DELETE all VASP files except CONTCAR and OSZICAR to save disk space. Always work with copies of your original data.
+
 ```
-formation_data/
+your_formation_data/  # You can use any name for this folder
 ├── bulk_compounds/
 │   ├── Compound_1/
 │   │   ├── INCAR
@@ -555,7 +543,8 @@ coeff_setting = {
     },
 }
 
-vasp_preprocessing("formation_data", coeff_setting)
+vasp_preprocessing("your_formation_data", coeff_setting)  # Deletes extra VASP files
+# Output: Creates raw_data/{your_folder_name}_bulk.json
 ```
 
 #### Calculation
@@ -595,12 +584,12 @@ Results include detailed Excel reports with formation energy metrics and compara
 
 ### Data Preparation
 
-> ⚠️ **Important**: Always work with a copy of your VASP data. The preprocessing function will delete all files except CONTCAR and OSZICAR.
+> **Note**: Unlike adsorption preprocessing, EOS preprocessing does NOT delete any files.
 
 EOS data requires multiple volume points for each material:
 
 ```
-eos_data/
+your_eos_data/  # You can use any name for this folder
 ├── Material_1/
 │   ├── 0/                 # Volume point 0 (smallest)
 │   │   ├── INCAR
@@ -644,8 +633,9 @@ Each material folder contains subdirectories (0, 1, 2, ..., 10) representing dif
 ```python
 from catbench.eos import eos_vasp_preprocessing
 
-eos_vasp_preprocessing("eos_data")
-# Output: Creates raw_data/eos_data_eos.json
+# Process EOS data (use your actual folder name here)
+eos_vasp_preprocessing("your_eos_data")  # Deletes extra VASP files
+# Output: Creates raw_data/{your_folder_name}_eos.json
 ```
 
 ### Calculation
