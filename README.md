@@ -106,7 +106,7 @@ data_for_catbench/
 │       ├── CONTCAR
 │       ├── OSZICAR
 │       └── ...
-├── system1/  # e.g., Pt111
+├── system1/  # e.g., material_1
 │   ├── slab/
 │   │   ├── CONTCAR
 │   │   ├── OSZICAR
@@ -129,7 +129,7 @@ data_for_catbench/
 │           ├── CONTCAR
 │           ├── OSZICAR
 │           └── ...
-└── system2/  # e.g., Ni111
+└── system2/  # e.g., material_2
     └── ...
 ```
 
@@ -289,8 +289,16 @@ result/
 │   ├── YourMLIP_gases.json          # Gas energies
 │   └── YourMLIP_anomaly_detection.json  # Anomaly flags
 └── plot/
-    ├── YourMLIP_parity.png           # Parity plots
-    └── comparison_all.png            # Multi-MLIP comparison
+    └── YourMLIP/
+        ├── mono/                     # Single parity plots (all adsorbates combined)
+        │   ├── YourMLIP_parity.png
+        │   └── YourMLIP_normal_parity.png
+        ├── multi/                    # Multiple parity plots (by adsorbate)
+        │   ├── YourMLIP_parity.png
+        │   └── YourMLIP_normal_parity.png
+        └── threshold_sensitivity/    # Threshold sensitivity analysis plots
+            ├── disp_thrs_sensitivity.png
+            └── bond_threshold_sensitivity.png
 ```
 
 #### 1. Parity Plot Analysis
@@ -304,8 +312,8 @@ CatBench generates comprehensive parity plots for visual assessment of MLIP perf
 <td><img src="assets/multi_plot.png" alt="Multi Plot" width="500"/></td>
 </tr>
 <tr>
-<td align="center"><strong>Mono Plot</strong><br/>All adsorbates combined in single parity plot</td>
-<td align="center"><strong>Multi Plot</strong><br/>Separate parity plots for each adsorbate</td>
+<td align="center"><strong>Mono Plot</strong><br/>All reactions combined in a single parity plot</td>
+<td align="center"><strong>Multi Plot</strong><br/>Separate parity plots displayed by adsorbate type</td>
 </tr>
 </table>
 </div>
@@ -315,10 +323,12 @@ CatBench generates comprehensive parity plots for visual assessment of MLIP perf
 The `{current_directory}_Benchmarking_Analysis.xlsx` file provides detailed performance metrics across multiple sheets:
 
 ##### **Main Performance Comparison**
-MLIP-to-MLIP performance overview with key metrics (showing 12 benchmarked MLIPs):
+MLIP-to-MLIP performance overview with key metrics:
 
-| MLIP_name | Normal rate (%) | Anomaly rate (%) | MAE_total (eV) | MAE_normal (eV) | ADwT (%) | AMDwT (%) |
-|-----------|----------------|------------------|----------------|-----------------|----------|-----------|
+<div style="font-size: 11px;">
+
+| MLIP | Normal (%) | Anomaly (%) | MAE_total (eV) | MAE_normal (eV) | ADwT (%) | AMDwT (%) |
+|------|------------|-------------|----------------|-----------------|----------|-----------|
 | MLIP_A | 77.25 | 14.39 | 1.118 | 0.316 | 77.98 | 84.71 |
 | MLIP_B | 74.22 | 16.84 | 0.667 | 0.512 | 69.66 | 80.80 |
 | MLIP_C | 80.18 | 13.51 | 0.917 | 0.241 | 78.97 | 86.79 |
@@ -326,26 +336,34 @@ MLIP-to-MLIP performance overview with key metrics (showing 12 benchmarked MLIPs
 | MLIP_E | 78.45 | 12.87 | 0.892 | 0.298 | 76.15 | 83.92 |
 | ... | ... | ... | ... | ... | ... | ... |
 
-*This enables direct performance comparison across all benchmarked MLIPs*
+</div>
+
+*Direct performance comparison across all benchmarked MLIPs with comprehensive metrics*
 
 ##### **Anomaly Analysis Sheet**
 Detailed breakdown of calculation anomalies by category:
 
-| MLIP_name | Normal | Adsorbate Migration | Energy Anomaly | Unphysical Relaxation | Reproduction Failure |
-|-----------|--------|-------------------|----------------|----------------------|-------------------|
+<div style="font-size: 11px;">
+
+| MLIP | Normal | Migration | Energy Anom. | Unphys. Relax | Reprod. Fail |
+|------|--------|-----------|--------------|---------------|--------------|
 | MLIP_A | 34,869 | 3,774 | 590 | 3,845 | 2,052 |
 | MLIP_B | 33,503 | 4,035 | 834 | 5,221 | 1,537 |
 | MLIP_C | 36,178 | 2,847 | 1,334 | 3,671 | 1,100 |
 | MLIP_D | 33,025 | 4,759 | 956 | 5,372 | 1,018 |
 | ... | ... | ... | ... | ... | ... |
 
-*This helps identify systematic issues and reliability patterns across all MLIPs*
+</div>
+
+*Identifies systematic issues and reliability patterns across MLIPs*
 
 ##### **Individual MLIP Sheets** 
 Adsorbate-specific performance for each MLIP (example from MLIP_A sheet):
 
-| Adsorbate | Normal_count | Anomaly_count | MAE_normal (eV) | MAE_total (eV) |
-|-----------|-------------|---------------|-----------------|----------------|
+<div style="font-size: 11px;">
+
+| Adsorbate | Normal | Anomaly | MAE_normal (eV) | MAE_total (eV) |
+|-----------|--------|---------|-----------------|----------------|
 | H | 1,247 | 89 | 0.234 | 0.891 |
 | OH | 1,156 | 124 | 0.298 | 1.045 |
 | O | 1,089 | 156 | 0.387 | 1.234 |
@@ -353,7 +371,9 @@ Adsorbate-specific performance for each MLIP (example from MLIP_A sheet):
 | NH3 | 892 | 167 | 0.512 | 1.789 |
 | ... | ... | ... | ... | ... |
 
-*Each of the 12 MLIPs has its own sheet revealing adsorbate-specific strengths and weaknesses*
+</div>
+
+*Each MLIP has its own sheet revealing adsorbate-specific strengths and weaknesses*
 
 #### 3. Threshold Sensitivity Analysis
 
@@ -376,9 +396,9 @@ CatBench provides automated threshold sensitivity analysis to optimize anomaly d
 
 #### 4. Additional Analysis Features
 
-- **Timing Analysis**: Computational efficiency metrics and performance scaling
+- **Cost Analysis**: Computational efficiency metrics and performance scaling
 - **Reproducibility Testing**: Multiple calculator runs ensure numerical stability  
-- **Statistical Metrics**: MAE, RMSE, R², ADwT, and AMDwT for comprehensive evaluation
+- **Statistical Metrics**: MAE, anomaly rates, ADwT, and AMDwT for comprehensive evaluation
 
 ## Relative Energy Benchmarking
 
@@ -392,11 +412,17 @@ CatBench supports two main types of relative energy calculations: surface energy
 
 ```
 surface_data/
-├── Pt/                    # Material 1
+├── Material_1/
 │   ├── bulk/
-│   │   ├── CONTCAR
-│   │   ├── OSZICAR
-│   │   └── ...
+│   │   ├── INCAR
+│   │   ├── POSCAR
+│   │   ├── POTCAR
+│   │   ├── KPOINTS
+│   │   ├── CONTCAR      # Required
+│   │   ├── OSZICAR      # Required
+│   │   ├── OUTCAR
+│   │   ├── vasprun.xml
+│   │   └── ...          # All other VASP files
 │   └── surfaces/
 │       ├── 100/
 │       │   ├── CONTCAR
@@ -410,7 +436,7 @@ surface_data/
 │           ├── CONTCAR
 │           ├── OSZICAR
 │           └── ...
-├── Ni/                    # Material 2
+├── Material_2/
 │   ├── bulk/
 │   │   ├── CONTCAR
 │   │   ├── OSZICAR
@@ -424,7 +450,7 @@ surface_data/
 │           ├── CONTCAR
 │           ├── OSZICAR
 │           └── ...
-└── Cu/                    # Material 3
+└── Material_3/
     ├── bulk/
     │   ├── CONTCAR
     │   ├── OSZICAR
@@ -477,14 +503,40 @@ analysis.analysis()
 
 ```
 result/
+└── YourMLIP/
+    ├── YourMLIP_surface_benchmark.json  # Calculation results
+    └── YourMLIP_surface_benchmark.xlsx  # Excel report
+
+plot/
 ├── YourMLIP/
-│   ├── YourMLIP_surface_benchmark.json  # Calculation results
-│   └── YourMLIP_surface_benchmark.xlsx  # Excel report
-└── plot/
-    └── YourMLIP/
-        ├── surface_parity.png           # Parity plot
-        └── surface_comparison.png        # Multi-MLIP comparison
+│   └── surface_parity.png              # Parity plot
+└── surface_comparison.png               # Multi-MLIP comparison
 ```
+
+#### Surface Energy Analysis Examples
+
+<div align="center">
+<img src="assets/surface_parity.png" alt="Surface Energy Parity Plot" width="600"/>
+</div>
+
+*Surface energy parity plot showing MLIP performance against DFT references for various metal surfaces*
+
+The Excel report provides comprehensive surface energy analysis:
+
+<div style="font-size: 12px;">
+
+| MLIP | MAE (J/m²) | RMSE (J/m²) | Max Error (J/m²) | Num_surfaces |
+|------|------------|-------------|------------------|--------------|
+| MLIP_A | 0.185 | 0.255 | 1.251 | 1915 |
+| MLIP_B | 0.483 | 0.567 | 2.110 | 1915 |
+| MLIP_C | 0.127 | 0.182 | 1.305 | 1915 |
+| MLIP_D | 0.261 | 0.333 | 1.326 | 1915 |
+| MLIP_E | 0.122 | 0.179 | 1.358 | 1915 |
+| MLIP_F | 0.138 | 0.194 | 1.245 | 1915 |
+| MLIP_G | 0.119 | 0.173 | 1.287 | 1915 |
+| ... | ... | ... | ... | ... |
+
+</div>
 
 ### Bulk Formation Energy
 
@@ -493,22 +545,33 @@ result/
 ```
 formation_data/
 ├── bulk_compounds/
-│   ├── NiO/
-│   │   ├── CONTCAR
-│   │   └── OSZICAR
-│   └── Fe2O3/
+│   ├── Compound_1/
+│   │   ├── INCAR
+│   │   ├── POSCAR
+│   │   ├── POTCAR
+│   │   ├── KPOINTS
+│   │   ├── CONTCAR      # Required
+│   │   ├── OSZICAR      # Required
+│   │   ├── OUTCAR
+│   │   ├── vasprun.xml
+│   │   └── ...          # All other VASP files
+│   └── Compound_2/
 │       ├── CONTCAR
-│       └── OSZICAR
+│       ├── OSZICAR
+│       └── ...
 └── elements/
-    ├── Ni/
+    ├── Element_A/
     │   ├── CONTCAR
-    │   └── OSZICAR
-    ├── Fe/
+    │   ├── OSZICAR
+    │   └── ...
+    ├── Element_B/
     │   ├── CONTCAR
-    │   └── OSZICAR
-    └── O/
+    │   ├── OSZICAR
+    │   └── ...
+    └── Element_C/
         ├── CONTCAR
-        └── OSZICAR
+        ├── OSZICAR
+        └── ...
 ```
 
 ```python
@@ -516,15 +579,15 @@ from catbench.relative.bulk_formation.data import vasp_preprocessing
 
 # Define formation reaction stoichiometry
 coeff_setting = {
-    "NiO": {
-        "bulk": 1,      # NiO
-        "Ni": -1,       # -Ni
-        "O": -1/2,      # -1/2 O2
+    "Compound_1": {
+        "bulk": 1,         # Compound_1
+        "Element_A": -1,   # -Element_A
+        "Element_C": -1/2, # -1/2 Element_C2
     },
-    "Fe2O3": {
-        "bulk": 1,      # Fe2O3
-        "Fe": -2,       # -2Fe
-        "O": -3/2,      # -3/2 O2
+    "Compound_2": {
+        "bulk": 1,         # Compound_2
+        "Element_B": -2,   # -2Element_B
+        "Element_C": -3/2, # -3/2 Element_C2
     },
 }
 
@@ -564,13 +627,14 @@ analysis.analysis()
 
 ```
 result/
+└── YourMLIP/
+    ├── YourMLIP_formation_benchmark.json  # Calculation results
+    └── YourMLIP_formation_benchmark.xlsx  # Excel report
+
+plot/
 ├── YourMLIP/
-│   ├── YourMLIP_formation_benchmark.json  # Calculation results
-│   └── YourMLIP_formation_benchmark.xlsx  # Excel report
-└── plot/
-    └── YourMLIP/
-        ├── formation_parity.png           # Parity plot
-        └── formation_comparison.png        # Multi-MLIP comparison
+│   └── formation_parity.png              # Parity plot
+└── formation_comparison.png               # Multi-MLIP comparison
 ```
 
 ## Equation of State (EOS) Benchmarking
@@ -583,29 +647,41 @@ EOS data requires multiple volume points for each material:
 
 ```
 eos_data/
-├── Pt/                    # Material 1
+├── Material_1/
 │   ├── 0/                 # Volume point 0 (smallest)
-│   │   ├── CONTCAR
-│   │   └── OSZICAR
+│   │   ├── INCAR
+│   │   ├── POSCAR
+│   │   ├── POTCAR
+│   │   ├── KPOINTS
+│   │   ├── CONTCAR      # Required
+│   │   ├── OSZICAR      # Required
+│   │   ├── OUTCAR
+│   │   ├── vasprun.xml
+│   │   └── ...          # All other VASP files
 │   ├── 1/
 │   │   ├── CONTCAR
-│   │   └── OSZICAR
+│   │   ├── OSZICAR
+│   │   └── ...
 │   ├── ...
 │   └── 10/                # Volume point 10 (largest)
 │       ├── CONTCAR
-│       └── OSZICAR
-├── Ni/                    # Material 2
+│       ├── OSZICAR
+│       └── ...
+├── Material_2/
 │   ├── 0/
 │   │   ├── CONTCAR
-│   │   └── OSZICAR
+│   │   ├── OSZICAR
+│   │   └── ...
 │   ├── 1/
 │   │   ├── CONTCAR
-│   │   └── OSZICAR
+│   │   ├── OSZICAR
+│   │   └── ...
 │   └── ...
-└── Cu/                    # Material 3
+└── Material_3/
     ├── 0/
     │   ├── CONTCAR
-    │   └── OSZICAR
+    │   ├── OSZICAR
+    │   └── ...
     └── ...
 ```
 
@@ -645,29 +721,49 @@ eos_analysis.analysis()
 ```
 
 This provides:
-- **Bulk modulus comparison**: MLIP vs DFT
-- **Equilibrium volume accuracy**
-- **EOS curve fitting quality**
+- **Bulk modulus (B0) comparison**: MLIP vs DFT using Birch-Murnaghan equation of state
+- **Equilibrium volume (V0) accuracy**: Comparison of predicted equilibrium volumes
+- **EOS curve fitting quality**: Assessment of complete pressure-volume relationship
 
 ### Output Files
 
 ```
 result/
+└── YourMLIP/
+    └── YourMLIP_eos_benchmark.json     # Calculation results
+
+plot/
 ├── YourMLIP/
-│   └── YourMLIP_eos_benchmark.json     # Calculation results
-└── plot/
-    └── YourMLIP/
-        ├── Pt_eos.png                   # Individual material EOS curves
-        ├── Ni_eos.png
-        ├── Cu_eos.png
-        └── eos_comparison.png           # Multi-MLIP comparison
+│   ├── material_1_eos.png              # Individual material EOS curves
+│   ├── material_2_eos.png
+│   └── material_3_eos.png
+└── eos_comparison.png                  # Multi-MLIP comparison
 ```
 
-The Excel report includes:
-- **Summary**: Bulk modulus and equilibrium volume metrics
-- **Material Details**: Per-material performance
-- **EOS Parameters**: Fitted curve parameters
-- **Raw Data**: Complete E-V data points
+#### EOS Analysis Examples
+
+<div align="center">
+<img src="assets/EOS_example.png" alt="EOS Analysis Example" width="600"/>
+</div>
+
+*EOS curve comparison showing MLIP vs DFT results fitted with Birch-Murnaghan equation*
+
+The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equation fitting:
+
+<div style="font-size: 12px;">
+
+| MLIP | RMSE (eV) | MAE (eV) | VASP B0 (GPa) | MLIP B0 (GPa) | B0 Error (GPa) | VASP V0 (Å³) | MLIP V0 (Å³) | V0 Error (Å³) |
+|------|-----------|----------|---------------|---------------|----------------|--------------|--------------|---------------|
+| MLIP_A | 0.634 | 0.462 | 80.53 | 102.59 | 22.06 | 475.37 | 469.42 | 5.95 |
+| MLIP_B | 0.411 | 0.318 | 80.53 | 72.29 | 8.24 | 475.37 | 478.51 | 3.13 |
+| MLIP_C | 0.444 | 0.350 | 80.53 | 88.02 | 7.49 | 475.37 | 470.70 | 4.67 |
+| MLIP_F | 0.343 | 0.229 | 80.53 | 89.10 | 8.57 | 475.37 | 474.96 | 0.42 |
+| MLIP_G | 0.762 | 0.447 | 80.53 | 97.94 | 17.41 | 475.37 | 472.02 | 3.36 |
+| ... | ... | ... | ... | ... | ... | ... | ... | ... |
+
+</div>
+
+*Analysis includes bulk modulus (B0), equilibrium volume (V0), and derivative (B0') from Birch-Murnaghan EOS fitting*
 
 ## Configuration Options
 
