@@ -121,6 +121,7 @@ RELATIVE_ANALYSIS_DEFAULTS = {
     "specific_color": "#2077B5",
     "min": None,
     "max": None,
+    "grid": False,
 }
 
 # ============================================================================

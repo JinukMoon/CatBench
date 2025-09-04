@@ -38,6 +38,7 @@ class RelativeEnergyAnalysis:
         mark_size (int, optional): Marker size for plots. Default: 100
         linewidths (float, optional): Line width for plots. Default: 1.5
         min/max (float, optional): Manual axis limits for plots
+        grid (bool, optional): Show grid on parity plots. Default: False
         mlip_name_map (dict, optional): Mapping from raw MLIP names to display names for plots/Excel. Default: {} (no mapping)
     """
     
@@ -65,6 +66,7 @@ class RelativeEnergyAnalysis:
         self.specific_color = kwargs.get("specific_color", get_default("specific_color", RELATIVE_ANALYSIS_DEFAULTS))
         self.min_value = kwargs.get("min", get_default("min", RELATIVE_ANALYSIS_DEFAULTS))
         self.max_value = kwargs.get("max", get_default("max", RELATIVE_ANALYSIS_DEFAULTS))
+        self.grid = kwargs.get("grid", get_default("grid", RELATIVE_ANALYSIS_DEFAULTS))
         # Display name mapping for MLIP names (for plots/Excel display only)
         self.mlip_name_map = kwargs.get("mlip_name_map", get_default("mlip_name_map", RELATIVE_ANALYSIS_DEFAULTS)) or {}
         
@@ -140,7 +142,10 @@ class RelativeEnergyAnalysis:
         ax.set_xlim(min_value, max_value)
         ax.set_ylim(min_value, max_value)
         ax.plot([min_value, max_value], [min_value, max_value], "r-")
-        ax.grid(True)
+        if self.grid:
+            ax.grid(True)
+        else:
+            ax.grid(False)
         
         for spine in ax.spines.values():
             spine.set_linewidth(3)

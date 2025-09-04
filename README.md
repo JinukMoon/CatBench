@@ -279,27 +279,7 @@ This generates stacked area charts showing how anomaly detection rates change wi
 
 ### Output Files
 
-```
-result/
-├── YourMLIP/
-│   ├── gases/           # Gas molecule calculations
-│   ├── log/             # Optimization logs
-│   ├── traj/            # Trajectory files
-│   ├── YourMLIP_result.json         # All calculation results
-│   ├── YourMLIP_gases.json          # Gas energies
-│   └── YourMLIP_anomaly_detection.json  # Anomaly flags
-└── plot/
-    └── YourMLIP/
-        ├── mono/                     # Single parity plots (all adsorbates combined)
-        │   ├── YourMLIP_parity.png
-        │   └── YourMLIP_normal_parity.png
-        ├── multi/                    # Multiple parity plots (by adsorbate)
-        │   ├── YourMLIP_parity.png
-        │   └── YourMLIP_normal_parity.png
-        └── threshold_sensitivity/    # Threshold sensitivity analysis plots
-            ├── disp_thrs_sensitivity.png
-            └── bond_threshold_sensitivity.png
-```
+Results are automatically saved to organized directories with comprehensive analysis reports, parity plots, and Excel summaries containing detailed performance metrics.
 
 #### 1. Parity Plot Analysis
 
@@ -308,8 +288,8 @@ CatBench generates comprehensive parity plots for visual assessment of MLIP perf
 <div align="center">
 <table>
 <tr>
-<td><img src="assets/mono_plot.png" alt="Mono Plot" width="500"/></td>
-<td><img src="assets/multi_plot.png" alt="Multi Plot" width="500"/></td>
+<td><img src="assets/mono_plot.png" alt="Mono Plot" width="650"/></td>
+<td><img src="assets/multi_plot.png" alt="Multi Plot" width="650"/></td>
 </tr>
 <tr>
 <td align="center"><strong>Mono Plot</strong><br/>All reactions combined in a single parity plot</td>
@@ -327,18 +307,18 @@ MLIP-to-MLIP performance overview with key metrics:
 
 <div style="font-size: 11px;">
 
-| MLIP | Normal (%) | Anomaly (%) | MAE_total (eV) | MAE_normal (eV) | ADwT (%) | AMDwT (%) |
-|------|------------|-------------|----------------|-----------------|----------|-----------|
-| MLIP_A | 77.25 | 14.39 | 1.118 | 0.316 | 77.98 | 84.71 |
-| MLIP_B | 74.22 | 16.84 | 0.667 | 0.512 | 69.66 | 80.80 |
-| MLIP_C | 80.18 | 13.51 | 0.917 | 0.241 | 78.97 | 86.79 |
-| MLIP_D | 73.20 | 16.26 | 0.738 | 0.413 | 71.27 | 81.03 |
-| MLIP_E | 78.45 | 12.87 | 0.892 | 0.298 | 76.15 | 83.92 |
-| ... | ... | ... | ... | ... | ... | ... |
+| MLIP | Normal (%) | Anomaly (%) | MAE_total (eV) | MAE_normal (eV) | ADwT (%) | AMDwT (%) | Time/step (ms) |
+|------|------------|-------------|----------------|-----------------|----------|-----------|----------------|
+| MLIP_A | 77.25 | 14.39 | 1.118 | 0.316 | 77.98 | 84.71 | 125.3 |
+| MLIP_B | 74.22 | 16.84 | 0.667 | 0.512 | 69.66 | 80.80 | 89.7 |
+| MLIP_C | 80.18 | 13.51 | 0.917 | 0.241 | 78.97 | 86.79 | 156.8 |
+| MLIP_D | 73.20 | 16.26 | 0.738 | 0.413 | 71.27 | 81.03 | 203.4 |
+| MLIP_E | 78.45 | 12.87 | 0.892 | 0.298 | 76.15 | 83.92 | 142.1 |
+| ... | ... | ... | ... | ... | ... | ... | ... |
 
 </div>
 
-*Direct performance comparison across all benchmarked MLIPs with comprehensive metrics*
+*Direct performance comparison across all benchmarked MLIPs with comprehensive metrics including ADwT (Accuracy within Threshold) and AMDwT (Anomaly-free Mean Deviation within Threshold)*
 
 ##### **Anomaly Analysis Sheet**
 Detailed breakdown of calculation anomalies by category:
@@ -362,14 +342,14 @@ Adsorbate-specific performance for each MLIP (example from MLIP_A sheet):
 
 <div style="font-size: 11px;">
 
-| Adsorbate | Normal | Anomaly | MAE_normal (eV) | MAE_total (eV) |
-|-----------|--------|---------|-----------------|----------------|
-| H | 1,247 | 89 | 0.234 | 0.891 |
-| OH | 1,156 | 124 | 0.298 | 1.045 |
-| O | 1,089 | 156 | 0.387 | 1.234 |
-| CO | 978 | 203 | 0.445 | 1.567 |
-| NH3 | 892 | 167 | 0.512 | 1.789 |
-| ... | ... | ... | ... | ... |
+| Adsorbate | Normal | Anomaly | MAE_total (eV) | MAE_normal (eV) | ADwT (%) | AMDwT (%) |
+|-----------|--------|---------|----------------|-----------------|----------|-----------|
+| H | 1,247 | 89 | 0.891 | 0.234 | 89.3 | 93.4 |
+| OH | 1,156 | 124 | 1.045 | 0.298 | 82.7 | 87.1 |
+| O | 1,089 | 156 | 1.234 | 0.387 | 78.5 | 82.9 |
+| CO | 978 | 203 | 1.567 | 0.445 | 74.2 | 78.6 |
+| NH3 | 892 | 167 | 1.789 | 0.512 | 71.8 | 76.3 |
+| ... | ... | ... | ... | ... | ... | ... |
 
 </div>
 
@@ -382,8 +362,8 @@ CatBench provides automated threshold sensitivity analysis to optimize anomaly d
 <div align="center">
 <table>
 <tr>
-<td><img src="assets/disp_thrs_sensitivity.png" alt="Displacement Threshold Sensitivity" width="500"/></td>
-<td><img src="assets/bond_threshold_sensitivity.png" alt="Bond Length Threshold Sensitivity" width="500"/></td>
+<td><img src="assets/disp_thrs_sensitivity.png" alt="Displacement Threshold Sensitivity" width="700"/></td>
+<td><img src="assets/bond_threshold_sensitivity.png" alt="Bond Length Threshold Sensitivity" width="700"/></td>
 </tr>
 <tr>
 <td align="center"><strong>Displacement Threshold Analysis</strong><br/>Impact of displacement threshold on anomaly detection rates</td>
@@ -391,14 +371,6 @@ CatBench provides automated threshold sensitivity analysis to optimize anomaly d
 </tr>
 </table>
 </div>
-
-*These stacked area charts help optimize threshold parameters for your specific catalytic systems*
-
-#### 4. Additional Analysis Features
-
-- **Cost Analysis**: Computational efficiency metrics and performance scaling
-- **Reproducibility Testing**: Multiple calculator runs ensure numerical stability  
-- **Statistical Metrics**: MAE, anomaly rates, ADwT, and AMDwT for comprehensive evaluation
 
 ## Relative Energy Benchmarking
 
@@ -501,22 +473,12 @@ analysis.analysis()
 
 #### Output Files
 
-```
-result/
-└── YourMLIP/
-    ├── YourMLIP_surface_benchmark.json  # Calculation results
-    └── YourMLIP_surface_benchmark.xlsx  # Excel report
-
-plot/
-├── YourMLIP/
-│   └── surface_parity.png              # Parity plot
-└── surface_comparison.png               # Multi-MLIP comparison
-```
+Results include comprehensive Excel reports with performance metrics and publication-ready parity plots for visual comparison.
 
 #### Surface Energy Analysis Examples
 
 <div align="center">
-<img src="assets/surface_parity.png" alt="Surface Energy Parity Plot" width="600"/>
+<img src="assets/surface_parity.png" alt="Surface Energy Parity Plot" width="750"/>
 </div>
 
 *Surface energy parity plot showing MLIP performance against DFT references for various metal surfaces*
@@ -625,17 +587,7 @@ analysis.analysis()
 
 #### Output Files
 
-```
-result/
-└── YourMLIP/
-    ├── YourMLIP_formation_benchmark.json  # Calculation results
-    └── YourMLIP_formation_benchmark.xlsx  # Excel report
-
-plot/
-├── YourMLIP/
-│   └── formation_parity.png              # Parity plot
-└── formation_comparison.png               # Multi-MLIP comparison
-```
+Results include detailed Excel reports with formation energy metrics and comparative parity plots across different MLIPs.
 
 ## Equation of State (EOS) Benchmarking
 
@@ -720,30 +672,14 @@ eos_analysis = EOSAnalysis()
 eos_analysis.analysis()
 ```
 
-This provides:
-- **Bulk modulus (B0) comparison**: MLIP vs DFT using Birch-Murnaghan equation of state
-- **Equilibrium volume (V0) accuracy**: Comparison of predicted equilibrium volumes
-- **EOS curve fitting quality**: Assessment of complete pressure-volume relationship
-
 ### Output Files
 
-```
-result/
-└── YourMLIP/
-    └── YourMLIP_eos_benchmark.json     # Calculation results
-
-plot/
-├── YourMLIP/
-│   ├── material_1_eos.png              # Individual material EOS curves
-│   ├── material_2_eos.png
-│   └── material_3_eos.png
-└── eos_comparison.png                  # Multi-MLIP comparison
-```
+Comprehensive analysis results including individual material EOS curves and multi-MLIP comparison reports with Birch-Murnaghan equation fitting parameters.
 
 #### EOS Analysis Examples
 
 <div align="center">
-<img src="assets/EOS_example.png" alt="EOS Analysis Example" width="600"/>
+<img src="assets/EOS_example.png" alt="EOS Analysis Example" width="750"/>
 </div>
 
 *EOS curve comparison showing MLIP vs DFT results fitted with Birch-Murnaghan equation*
@@ -863,6 +799,7 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `specific_color` | Color for plots | str | "#2077B5" |
 | `min` | Minimum value for plot axes | float | None |
 | `max` | Maximum value for plot axes | float | None |
+| `grid` | Show grid on plots | bool | False |
 | `font_setting` | Custom font settings | list[str] | False |
 
 ### EOSCalculation
