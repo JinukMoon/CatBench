@@ -248,8 +248,14 @@ adsorption_calc.run()
 ```python
 from catbench.adsorption import AdsorptionAnalysis
 
-# Analyze results (all parameters optional, auto-detects MLIPs)
-analysis = AdsorptionAnalysis()
+# Configure and run analysis
+config = {
+    #"mlip_list": ["MLIP_A", "MLIP_B", ...],  # If not set, auto-detects all MLIPs in result folder
+    #"font_setting": ["~/fonts/your_font_file.ttf", "sans-serif"],  # Custom font path
+    # ... add any other options from Configuration Options section
+}
+
+analysis = AdsorptionAnalysis(**config)
 analysis.analysis()
 ```
 
@@ -258,7 +264,7 @@ This generates:
 - **Excel report**: Comprehensive metrics including MAE, RMSE, anomaly statistics
 - **Anomaly detection**: Automatic identification of problematic calculations
 
-You can freely analyze specific adsorbates and MLIPs, and customize various options including parity plot appearance and font sizes through [configuration options](#adsorptionanalysis).
+All configuration options are documented in the [Configuration Options](#configuration-options) section below.
 
 ### Threshold Sensitivity Analysis
 
@@ -427,7 +433,7 @@ from catbench.relative.surface_energy.data import surface_energy_vasp_preprocess
 
 # Process surface energy data (use your actual folder name here)
 surface_energy_vasp_preprocessing("your_surface_data")  # Deletes extra VASP files
-# Output: Creates raw_data/{your_folder_name}_surface.json
+# Output: Creates raw_data/{your_surface_data}_surface_energy.json
 ```
 
 #### Calculation
@@ -451,11 +457,15 @@ surface_calc.run()
 ```python
 from catbench.relative import RelativeEnergyAnalysis
 
-# Analyze surface energy results
-analysis = RelativeEnergyAnalysis(
-    task_type="surface",  # Required: "surface", "bulk_formation", or "custom"
-    benchmark="surface_benchmark"
-)
+# Configure and run analysis
+config = {
+    "task_type": "surface",  # Required: "surface", "bulk_formation", or "custom"
+    #"mlip_list": ["MLIP_A", "MLIP_B", ...],  # If not set, auto-detects all MLIPs in result folder
+    #"font_setting": ["~/fonts/your_font_file.ttf", "sans-serif"],  # Custom font path
+    # ... add any other options from Configuration Options section
+}
+
+analysis = RelativeEnergyAnalysis(**config)
 analysis.analysis()
 ```
 
@@ -568,11 +578,15 @@ formation_calc.run()
 ```python
 from catbench.relative import RelativeEnergyAnalysis
 
-# Analyze bulk formation energy results
-analysis = RelativeEnergyAnalysis(
-    task_type="bulk_formation",
-    benchmark="formation_benchmark"
-)
+# Configure and run analysis
+config = {
+    "task_type": "bulk_formation",  # Required: "surface", "bulk_formation", or "custom"
+    #"mlip_list": ["MLIP_A", "MLIP_B", ...],  # If not set, auto-detects all MLIPs in result folder
+    #"font_setting": ["~/fonts/your_font_file.ttf", "sans-serif"],  # Custom font path
+    # ... add any other options from Configuration Options section
+}
+
+analysis = RelativeEnergyAnalysis(**config)
 analysis.analysis()
 ```
 
@@ -635,7 +649,7 @@ from catbench.eos import eos_vasp_preprocessing
 
 # Process EOS data (use your actual folder name here)
 eos_vasp_preprocessing("your_eos_data")  # Deletes extra VASP files
-# Output: Creates raw_data/{your_folder_name}_eos.json
+# Output: Creates raw_data/{your_eos_data}_eos.json
 ```
 
 ### Calculation
@@ -659,8 +673,14 @@ eos_calc.run()
 ```python
 from catbench.eos import EOSAnalysis
 
-# Analyze results (auto-detects MLIPs if not specified)
-eos_analysis = EOSAnalysis()
+# Configure and run analysis
+config = {
+    #"mlip_list": ["MLIP_A", "MLIP_B", ...],  # If not set, auto-detects all MLIPs in result folder
+    #"font_setting": ["~/fonts/your_font_file.ttf", "sans-serif"],  # Custom font path
+    # ... add any other options from Configuration Options section
+}
+
+eos_analysis = EOSAnalysis(**config)
 eos_analysis.analysis()
 ```
 
@@ -724,6 +744,15 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `reproduction_thrs` | Reproducibility threshold (eV) | float | 0.2 |
 | `bond_length_change_threshold` | Bond length change threshold for anomaly detection (fraction) | float | 0.2 |
 | `energy_cutoff` | Max reference energy to include (eV) | float | None |
+| **Plot Customization** | | | |
+| `figsize` | Figure size (width, height) in inches | tuple | (10, 10) |
+| `dpi` | Plot resolution (dots per inch) | int | 200 |
+| `font_size_axis_label` | Axis label font size | int | 12 |
+| `font_size_legend` | Legend font size | int | 11 |
+| `font_size_tick_label` | Tick label font size | int | 11 |
+| `marker_size` | Scatter plot marker size | int | 50 |
+| `marker_alpha` | Marker transparency (0-1) | float | 0.6 |
+| `grid` | Show grid lines | bool | True |
 | `time_unit` | Time display unit: "s", "ms", "µs" | str | "s" |
 | **Plot Appearance** | | | |
 | `figsize` | Plot dimensions | tuple[int, int] | (9, 8) |
