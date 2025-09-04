@@ -183,7 +183,7 @@ for i in range(calc_num):
 config = {
     "mlip_name": "YourMLIP",
     "benchmark": "dataset_name",
-    # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixed atoms
+    # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixing constraints
 }
 
 adsorption_calc = AdsorptionCalculation(calculators, **config)
@@ -446,8 +446,8 @@ calc = YourCalculator(...)  # Your MLIP with desired settings
 
 surface_calc = SurfaceEnergyCalculation(
     calculator=calc,
-    mlip_name="YourMLIP",
-    benchmark="surface_benchmark"
+    benchmark="surface_benchmark",
+    mlip_name="YourMLIP"
 )
 surface_calc.run()
 ```
@@ -537,7 +537,7 @@ your_formation_data/  # You can use any name for this folder
 ```
 
 ```python
-from catbench.relative.bulk_formation.data import vasp_preprocessing
+from catbench.relative.bulk_formation.data import bulk_formation_vasp_preprocessing
 
 # Define formation reaction stoichiometry
 coeff_setting = {
@@ -553,7 +553,7 @@ coeff_setting = {
     },
 }
 
-vasp_preprocessing("your_formation_data", coeff_setting)  # Deletes extra VASP files
+bulk_formation_vasp_preprocessing("your_formation_data", coeff_setting)  # Deletes extra VASP files
 # Output: Creates raw_data/{your_folder_name}_bulk.json
 ```
 
@@ -567,8 +567,8 @@ calc = YourCalculator(...)  # Your MLIP with desired settings
 
 formation_calc = BulkFormationCalculation(
     calculator=calc,
-    mlip_name="YourMLIP",
-    benchmark="formation_benchmark"
+    benchmark="formation_benchmark",
+    mlip_name="YourMLIP"
 )
 formation_calc.run()
 ```
@@ -745,21 +745,14 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `bond_length_change_threshold` | Bond length change threshold for anomaly detection (fraction) | float | 0.2 |
 | `energy_cutoff` | Max reference energy to include (eV) | float | None |
 | **Plot Customization** | | | |
-| `figsize` | Figure size (width, height) in inches | tuple | (10, 10) |
-| `dpi` | Plot resolution (dots per inch) | int | 200 |
-| `font_size_axis_label` | Axis label font size | int | 12 |
-| `font_size_legend` | Legend font size | int | 11 |
-| `font_size_tick_label` | Tick label font size | int | 11 |
-| `marker_size` | Scatter plot marker size | int | 50 |
-| `marker_alpha` | Marker transparency (0-1) | float | 0.6 |
-| `grid` | Show grid lines | bool | True |
-| `time_unit` | Time display unit: "s", "ms", "µs" | str | "s" |
+| `figsize` | Figure size (width, height) in inches | tuple | (9, 8) |
+| `dpi` | Plot resolution (dots per inch) | int | 300 |
+| `time_unit` | Time display unit: "s", "ms", "µs" | str | "ms" |
+| `plot_enabled` | Generate plots | bool | True |
+| `mlip_name_map` | Dictionary for MLIP display names | dict[str, str] | {} |
 | **Plot Appearance** | | | |
-| `figsize` | Plot dimensions | tuple[int, int] | (9, 8) |
-| `dpi` | Plot resolution | int | 300 |
 | `mark_size` | Marker size in plots | int | 100 |
 | `linewidths` | Line width in plots | float | 1.5 |
-| `specific_color` | Color for monochrome plots | str | "#2077B5" |
 | **Plot Axes** | | | |
 | `min` | Minimum value for plot axes | float | None |
 | `max` | Maximum value for plot axes | float | None |
