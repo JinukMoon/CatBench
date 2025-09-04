@@ -212,6 +212,7 @@ for i in range(calc_num):
 config = {
     "mlip_name": "YourMLIP_D3",
     "benchmark": "dataset_name",
+    # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixed atoms
 }
 adsorption_calc = AdsorptionCalculation(calculators, **config)
 adsorption_calc.run()
@@ -236,6 +237,7 @@ for i in range(calc_num):
 config = {
     "mlip_name": "OC20_MLIP",
     "benchmark": "dataset_name",
+    # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixed atoms
 }
 adsorption_calc = AdsorptionCalculation(calculators, mode="oc20", **config)
 adsorption_calc.run()
@@ -716,6 +718,7 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `damping` | Optimization damping factor | float | 1.0 |
 | `optimizer` | ASE optimizer: "LBFGS", "BFGS", "FIRE" | str | "LBFGS" |
 | `save_step` | Save interval for checkpointing | int | 50 |
+| `chemical_bond_cutoff` | Cutoff distance for bond change calculation (Å) | float | 6.0 |
 
 ### AdsorptionAnalysis
 

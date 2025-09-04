@@ -679,8 +679,8 @@ class AdsorptionCalculation:
         n_substrate_atoms = len(initial_atoms) - len(adsorbate_indices)
         
         for ads_idx in adsorbate_indices:
-            # Find neighbors within cutoff distance (6.0 Å)
-            cutoff = 6.0
+            # Find neighbors within cutoff distance
+            cutoff = self.config.get("chemical_bond_cutoff", 6.0)
             
             for partner_idx in range(len(initial_atoms)):
                 if partner_idx == ads_idx:
