@@ -166,6 +166,7 @@ cython_debug/
 .cursorrules
 .cursor/
 CLAUDE_SUGGESTIONS.md
+CLAUDE.md
 
 # Analysis output files
 *.xlsx
