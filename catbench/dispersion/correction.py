@@ -97,7 +97,12 @@ class DispersionCorrection:
             )
         
         try:
-            # Import D3Calculator directly (path already added to sys.path)
+            # Ensure cuda path is in sys.path
+            _d3_path = os.path.join(os.path.dirname(__file__), 'cuda')
+            if _d3_path not in sys.path:
+                sys.path.insert(0, _d3_path)
+            
+            # Import D3Calculator directly
             from d3_calculator import D3Calculator
             return D3Calculator
         except ImportError as e:
