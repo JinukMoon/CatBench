@@ -8,6 +8,15 @@ setup(
     author="JinukMoon",
     author_email="jumoon@snu.ac.kr",
     packages=find_packages(),
+    package_data={
+        'catbench.dispersion': [
+            'cuda/*.py',
+            'cuda/*.so',
+            'cuda/pair_e3gnn/*.cu',
+            'cuda/pair_e3gnn/*.h',
+        ],
+    },
+    include_package_data=True,
     description="CatBench: Benchmark Framework of Machine Learning Interatomic Potentials for Adsorption Energy Predictions in Heterogeneous Catalysis",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
