@@ -183,7 +183,7 @@ for i in range(calc_num):
 config = {
     "mlip_name": "YourMLIP",
     "benchmark": "dataset_name",
-    # "rate": None,  # Add this to preserve VASP fixed atoms constraints
+    # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixed atoms
 }
 
 adsorption_calc = AdsorptionCalculation(calculators, **config)
@@ -712,7 +712,7 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `mode` | Calculation mode: "basic" or "oc20" | str | "basic" |
 | `f_crit_relax` | Force convergence criterion (eV/Å) | float | 0.05 |
 | `n_crit_relax` | Maximum optimization steps | int | 999 |
-| `rate` | Fraction of atoms to fix (0: use original, None: preserve VASP constraints) | float | 0.5 |
+| `rate` | Fraction of atoms to fix (0: no atoms fixed, None: preserve original constraints) | float | 0.5 |
 | `damping` | Optimization damping factor | float | 1.0 |
 | `optimizer` | ASE optimizer: "LBFGS", "BFGS", "FIRE" | str | "LBFGS" |
 | `save_step` | Save interval for checkpointing | int | 50 |
