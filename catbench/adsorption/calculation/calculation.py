@@ -8,7 +8,6 @@ adsorption energy benchmarking calculations with MLIPs.
 import json
 import os
 import shutil
-from collections import Counter
 
 import numpy as np
 from ase.io import write
@@ -680,7 +679,7 @@ class AdsorptionCalculation:
         
         for ads_idx in adsorbate_indices:
             # Find neighbors within cutoff distance
-            cutoff = self.config.get("chemical_bond_cutoff", 6.0)
+            cutoff = self.config.get("chemical_bond_cutoff", get_default("chemical_bond_cutoff", CALCULATION_DEFAULTS))
             
             for partner_idx in range(len(initial_atoms)):
                 if partner_idx == ads_idx:

@@ -163,5 +163,5 @@ def save_anomaly_detection_results(calculating_path: str, mlip_name: str,
 
 def get_calculation_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     """Extract calculation settings for saving to result file."""
-    settings_keys = ["optimizer", "f_crit_relax", "n_crit_relax", "rate", "damping", "save_step"]
+    settings_keys = ["optimizer", "f_crit_relax", "n_crit_relax", "rate", "damping", "save_step", "chemical_bond_cutoff"]
     return {k: config.get(k) for k in settings_keys if k in config}

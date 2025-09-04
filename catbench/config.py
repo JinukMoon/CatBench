@@ -21,6 +21,9 @@ CALCULATION_DEFAULTS = {
     "n_crit_relax": 999,
     "rate": 0.5,
     "damping": 1.0,
+    
+    # Bond analysis
+    "chemical_bond_cutoff": 6.0,  # Chemical bond cutoff in Å for max_bond_change calculation
 }
 
 # ============================================================================
@@ -43,8 +46,7 @@ ANALYSIS_DEFAULTS = {
     "reproduction_thrs": 0.2,
     
     # Adsorbate migration detection thresholds
-    "chemical_bond_cutoff": 6.0,  # Chemical bond cutoff in Å
-    "bond_length_change_threshold": 0.2,  # 20% bond length change threshold
+    "bond_length_change_threshold": 0.2,  # 20% bond length change threshold for anomaly detection
     
     # Plot settings
     "figsize": (9, 8),
