@@ -63,24 +63,36 @@ def process_output(dataset_name, coeff_setting):
     # Add coefficient files where needed
     for dirpath, dirnames, filenames in os.walk(dataset_name):
         if "OSZICAR" in filenames and "CONTCAR" in filenames:
-
-            rxn_name = dirpath.split("/")[2] if len(dirpath.split("/")) > 2 else None
+            # Get relative path from dataset root
+            rel_path = os.path.relpath(dirpath, dataset_name)
+            path_parts = rel_path.split(os.sep)
             
-            if rxn_name:
-                not_calc_dirs = [
+            # Skip if path is too short or is in gas directory
+            if len(path_parts) < 2 or path_parts[0] == "gas":
+                continue
+                
+            slab_name = path_parts[0]
+            rxn_name = path_parts[1] if len(path_parts) > 1 else None
+            
+            # Get list of non-calculation directories (gas species and slab)
+            not_calc_dirs = ["slab"]
+            gas_path = os.path.join(dataset_name, "gas")
+            if os.path.exists(gas_path):
+                not_calc_dirs += [
                     name
-                    for name in os.listdir(f"{dataset_name}/gas")
-                    if os.path.isdir(os.path.join(f"{dataset_name}/gas", name))
-                ] + ["slab"]
-
-                if rxn_name not in not_calc_dirs:
+                    for name in os.listdir(gas_path)
+                    if os.path.isdir(os.path.join(gas_path, name))
+                ]
+            
+            # Only add coeff.json for actual reaction directories
+            if rxn_name and rxn_name not in not_calc_dirs:
+                if rxn_name in coeff_setting:
                     coeff = coeff_setting[rxn_name]
+                    coeff_path = os.path.join(dirpath, "coeff.json")
+                    if not os.path.exists(coeff_path):
+                        save_json(coeff, coeff_path, use_numpy_encoder=False)
                 else:
-                    coeff = {}
-
-                coeff_path = os.path.join(dirpath, "coeff.json")
-                if not os.path.exists(coeff_path) and coeff != {}:
-                    save_json(coeff, coeff_path, use_numpy_encoder=False)
+                    print(f"Warning: No coefficient settings found for reaction '{rxn_name}' in {slab_name}")
 
     for dir_name in os.listdir(dataset_name):
         dir_path = os.path.join(dataset_name, dir_name)
@@ -105,19 +117,33 @@ def userdata_preprocess(dataset_name):
     path_output = get_raw_data_path(dataset_name)
     data_total = {}
     tags = []
-    not_calc_dirs = [
-        name
-        for name in os.listdir(f"{dataset_name}/gas")
-        if os.path.isdir(os.path.join(f"{dataset_name}/gas", name))
-    ] + ["slab"]
+    
+    # Get list of non-calculation directories
+    not_calc_dirs = ["slab"]
+    gas_path = os.path.join(dataset_name, "gas")
+    if os.path.exists(gas_path):
+        not_calc_dirs += [
+            name
+            for name in os.listdir(gas_path)
+            if os.path.isdir(os.path.join(gas_path, name))
+        ]
 
     for dirpath, dirnames, filenames in os.walk(dataset_name):
         if "OSZICAR" in filenames and "CONTCAR" in filenames:
-            rxn_name = dirpath.split("/")[2]
-            if rxn_name not in not_calc_dirs:
+            # Get relative path from dataset root
+            rel_path = os.path.relpath(dirpath, dataset_name)
+            path_parts = rel_path.split(os.sep)
+            
+            # Skip if in gas directory or path too short
+            if len(path_parts) < 2 or path_parts[0] == "gas":
+                continue
+                
+            slab_name = path_parts[0]
+            rxn_name = path_parts[1] if len(path_parts) > 1 else None
+            
+            if rxn_name and rxn_name not in not_calc_dirs:
                 input = {}
-                slab_name = dirpath.split("/")[1]
-                slab_path = dirpath[: dirpath.find("/", dirpath.find("/") + 1)]
+                slab_path = os.path.join(dataset_name, slab_name)
 
                 coeff_path = os.path.join(dirpath, "coeff.json")
                 with open(coeff_path, "r") as file:
