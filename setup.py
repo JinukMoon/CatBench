@@ -16,7 +16,6 @@ setup(
             'cuda/pair_e3gnn/*.h',
         ],
     },
-    include_package_data=True,
     description="CatBench: Benchmark Framework of Machine Learning Interatomic Potentials for Adsorption Energy Predictions in Heterogeneous Catalysis",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
