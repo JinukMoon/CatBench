@@ -211,13 +211,13 @@ class AdsorptionAnalysis:
                     total_count += len(category["DFT"])
         return total_count
 
-    def mono_plotter(self, ads_data, mlip_name, tag, min_value, max_value, mono_path, cached_plot_data=None):
-        """Create monochrome plot with optional cached data for better performance."""
+    def mono_plotter(self, ads_data, mlip_name, tag, min_value, max_value, mono_path, plot_data=None):
+        """Create monochrome plot with optional pre-computed data."""
         fig, ax = self._create_base_plot(min_value, max_value)
 
-        # Use cached data if provided, otherwise compute
-        if cached_plot_data is not None:
-            plot_data = cached_plot_data
+        # Use pre-computed data if provided, otherwise compute
+        if plot_data is not None:
+            pass
         else:
             # Use dictionary lookup for efficient data access
             type_mapping = {
@@ -298,7 +298,7 @@ class AdsorptionAnalysis:
         return MAE
 
     def multi_plotter(self, ads_data, mlip_name, types, tag, min_value, max_value, multi_path):
-        """Optimized multi-color plot with reduced prepare_plot_data calls."""
+        """Create multi-color plot with adsorbate-specific colors."""
         fig, ax = self._create_base_plot(min_value, max_value)
 
         # Sort adsorbates by total data count (descending) for consistent order
@@ -315,7 +315,7 @@ class AdsorptionAnalysis:
         # Check if this is a single calculation (no error bars)
         is_single_calc = tag == "single" or "MLIP_min" not in ads_data["all"].get(types[0], {})
 
-        # Cache prepare_plot_data results for each adsorbate
+        # Pre-compute plot data for each adsorbate
         plot_data_cache = {}
         for adsorbate in analysis_adsorbates:
             plot_data_cache[adsorbate] = prepare_plot_data(ads_data, types, adsorbate)
@@ -947,9 +947,8 @@ class AdsorptionAnalysis:
         Output:
             - Threshold sensitivity plots: plot/{mlip_name}/threshold_sensitivity/
 
-        Performance:
-            Uses real-time calculations with direct data access from result.json.
-            No threshold-specific caching needed due to vectorized operations.
+        Implementation:
+            Uses direct data access from result.json with vectorized operations.
         """
         # Determine which modes to run
         if mode == "both":
@@ -2043,9 +2042,8 @@ class AdsorptionAnalysis:
         Generate all plots efficiently.
 
         This function:
-        1. Pre-computes all plot data once and caches it
+        1. Pre-computes all plot data once
         2. Generates mono and multi plots systematically
-        3. Minimizes prepare_plot_data calls
 
         Returns:
             tuple: (MAE_total, MAE_normal, MAEs_total_multi, MAEs_normal_multi)
@@ -2058,7 +2056,7 @@ class AdsorptionAnalysis:
             "anomaly": ["energy_anomaly", "unphysical_relaxation", "reproduction_failure"]
         }
 
-        # Pre-compute and cache all plot data
+        # Pre-compute all plot data
         plot_data_cache = {}
         for tag, types in plot_configs.items():
             plot_data_cache[tag] = prepare_plot_data(ads_data, types)
@@ -2067,7 +2065,7 @@ class AdsorptionAnalysis:
         if len(single_data["all"]["all"]["DFT"]) > 0:
             plot_data_cache["single"] = prepare_plot_data(single_data, ["all"])
 
-        # Generate mono plots with cached data
+        # Generate mono plots with pre-computed data
         MAE_total = self.mono_plotter(ads_data, mlip_name, "total", min_value, max_value, mono_path, plot_data_cache.get("total"))
         MAE_normal = self.mono_plotter(ads_data, mlip_name, "normal", min_value, max_value, mono_path, plot_data_cache.get("normal"))
         self.mono_plotter(ads_data, mlip_name, "migration", min_value, max_value, mono_path, plot_data_cache.get("migration"))
