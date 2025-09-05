@@ -202,6 +202,15 @@ class AdsorptionAnalysis:
 
         return fig, ax
 
+    def _get_adsorbate_count(self, ads, ads_data):
+        """Helper method to count total data points for an adsorbate across all categories."""
+        total_count = 0
+        if ads in ads_data:
+            for category in ads_data[ads].values():
+                if isinstance(category, dict) and "DFT" in category:
+                    total_count += len(category["DFT"])
+        return total_count
+
     def mono_plotter(self, ads_data, mlip_name, tag, min_value, max_value, mono_path, cached_plot_data=None):
         """Create monochrome plot with optional cached data for better performance."""
         fig, ax = self._create_base_plot(min_value, max_value)
@@ -293,16 +302,8 @@ class AdsorptionAnalysis:
         fig, ax = self._create_base_plot(min_value, max_value)
 
         # Sort adsorbates by total data count (descending) for consistent order
-        def get_adsorbate_count(ads):
-            total_count = 0
-            if ads in ads_data:
-                for category in ads_data[ads].values():
-                    if isinstance(category, dict) and "DFT" in category:
-                        total_count += len(category["DFT"])
-            return total_count
-
         analysis_adsorbates = sorted([ads for ads in ads_data.keys() if ads != "all"], 
-                                   key=get_adsorbate_count, reverse=True)
+                                   key=lambda ads: self._get_adsorbate_count(ads, ads_data), reverse=True)
         len_adsorbates = len(analysis_adsorbates)
         legend_width = len(max(analysis_adsorbates, key=len)) if analysis_adsorbates else 0
 
@@ -1529,9 +1530,7 @@ class AdsorptionAnalysis:
                     min_value, max_value = self.min_value, self.max_value
 
                 # Re-sort adsorbates by data count for consistent ordering across all plots
-                # Using the same get_adsorbate_count function defined above
-
-                analysis_adsorbates = sorted(analysis_adsorbates, key=get_adsorbate_count, reverse=True)
+                analysis_adsorbates = sorted(analysis_adsorbates, key=lambda ads: self._get_adsorbate_count(ads, ads_data), reverse=True)
 
                 # Create single calculation plots data with re-sorted adsorbates
                 single_data = self._create_single_data_structure(mlip_result, analysis_adsorbates)

@@ -677,9 +677,12 @@ class AdsorptionCalculation:
         max_change_pct = 0.0
         n_substrate_atoms = len(initial_atoms) - len(adsorbate_indices)
         
+        # Get chemical bond cutoff and ensure it's saved in config
+        cutoff = self.config.get("chemical_bond_cutoff", get_default("chemical_bond_cutoff", CALCULATION_DEFAULTS))
+        self.config["chemical_bond_cutoff"] = cutoff
+        
         for ads_idx in adsorbate_indices:
             # Find neighbors within cutoff distance
-            cutoff = self.config.get("chemical_bond_cutoff", get_default("chemical_bond_cutoff", CALCULATION_DEFAULTS))
             
             for partner_idx in range(len(initial_atoms)):
                 if partner_idx == ads_idx:

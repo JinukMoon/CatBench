@@ -134,10 +134,13 @@ def save_calculation_results(save_directory: str, mlip_name: str,
                             gas_energies_single: Optional[Dict] = None,
                             calculation_settings: Optional[Dict] = None) -> None:
     """Save calculation results to JSON files."""
-    # Add calculation settings if provided
-    result_with_settings = result_data.copy()
+    # Create result dictionary with calculation_settings first
+    result_with_settings = {}
     if calculation_settings:
         result_with_settings["calculation_settings"] = calculation_settings
+    
+    # Add all other data after calculation_settings
+    result_with_settings.update(result_data)
     
     # Save main results
     result_path = os.path.join(save_directory, f"{mlip_name}_result.json")
