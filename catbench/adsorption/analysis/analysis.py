@@ -965,6 +965,7 @@ class AdsorptionAnalysis:
             self.mlip_list = sorted([
                 name for name in os.listdir(self.calculating_path)
                 if os.path.isdir(os.path.join(self.calculating_path, name))
+                and os.path.exists(os.path.join(self.calculating_path, name, f"{name}_result.json"))
             ], key=str.lower)
 
         # Backup original threshold values
@@ -1331,6 +1332,7 @@ class AdsorptionAnalysis:
             self.mlip_list = sorted([
                 name for name in os.listdir(self.calculating_path)
                 if os.path.isdir(os.path.join(self.calculating_path, name))
+                and os.path.exists(os.path.join(self.calculating_path, name, f"{name}_result.json"))
             ], key=str.lower)
 
         for mlip_name in sorted(self.mlip_list, key=str.lower):
