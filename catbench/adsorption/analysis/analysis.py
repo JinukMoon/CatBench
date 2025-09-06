@@ -8,6 +8,8 @@ for adsorption energy benchmarking results with Machine Learning Interatomic Pot
 import json
 import os
 
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FormatStrFormatter
 import numpy as np
@@ -90,6 +92,12 @@ class AdsorptionAnalysis:
         self.exclude_adsorbates = kwargs.get("exclude_adsorbates", get_default("exclude_adsorbates", ANALYSIS_DEFAULTS))
         self.benchmarking_name = kwargs.get("benchmarking_name", get_default("benchmarking_name", ANALYSIS_DEFAULTS))
         self.time_unit = kwargs.get("time_unit", get_default("time_unit", ANALYSIS_DEFAULTS))
+        
+        # Cache for performance optimization
+        self._adwt_cache = {}
+        self._amdwt_cache = {}
+        self._mlip_result_cache = {}
+        self._calculation_cache = {}
 
         # Anomaly detection thresholds
         self.disp_thrs = kwargs.get("disp_thrs", get_default("disp_thrs", ANALYSIS_DEFAULTS))
@@ -248,6 +256,7 @@ class AdsorptionAnalysis:
                 s=self.mark_size,
                 edgecolors="black",
                 linewidths=self.linewidths,
+                rasterized=True
             )
 
             if self.error_bar_display and "MLIP_min" in plot_data and tag != "single":
@@ -347,6 +356,7 @@ class AdsorptionAnalysis:
                 edgecolors="black",
                 linewidths=self.linewidths,
                 zorder=zorder_value,
+                rasterized=True
             )
 
             if self.error_bar_display and not is_single_calc and "MLIP_min" in plot_data:
@@ -449,13 +459,8 @@ class AdsorptionAnalysis:
                 data_dict = MLIPs_data[mlip_name]
                 data_tmp = []
 
-                # Get the corresponding mlip_result for ADwT/AMDwT calculation
-                mlip_result_file = f"{self.calculating_path}/{mlip_name}/{mlip_name}_result.json"
-                try:
-                    with open(mlip_result_file, "r") as f:
-                        mlip_result = json.load(f)
-                except:
-                    mlip_result = {}
+                # Use cached mlip_result instead of reloading from file
+                mlip_result = self._mlip_result_cache.get(mlip_name, {})
 
                 display_name = self._display_mlip_name(mlip_name)
                 for adsorbate in analysis_adsorbates:
@@ -475,9 +480,10 @@ class AdsorptionAnalysis:
                         # Calculate single MAE for this specific adsorbate
                         single_mae_adsorbate = data_dict.get("single_mae", {}).get(adsorbate, 0.0)
 
-                        # Calculate ADwT and AMDwT for this adsorbate
-                        adwt_adsorbate = self._calculate_adwt_by_adsorbate(mlip_result, adsorbate) if mlip_result else 0.0
-                        amdwt_adsorbate = self._calculate_amdwt_by_adsorbate(mlip_result, adsorbate) if mlip_result else 0.0
+                        # Use cached ADwT and AMDwT values for this adsorbate
+                        cache_key = (mlip_name, adsorbate)
+                        adwt_adsorbate = self._adwt_cache.get(cache_key, 0.0)
+                        amdwt_adsorbate = self._amdwt_cache.get(cache_key, 0.0)
 
                         data_tmp.append({
                             "Adsorbate_name": adsorbate,
@@ -1366,16 +1372,16 @@ class AdsorptionAnalysis:
             # Initialize data structures for 5-category classification
             ads_data = {
                 "all": {
-                    "normal": {"DFT": np.array([]), "MLIP": np.array([]), 
-                             "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                    "energy_anomaly": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                     "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                    "adsorbate_migration": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                          "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                    "unphysical_relaxation": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                            "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                    "reproduction_failure": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                           "MLIP_min": np.array([]), "MLIP_max": np.array([])},
+                    "normal": {"DFT": [], "MLIP": [], 
+                             "MLIP_min": [], "MLIP_max": []},
+                    "energy_anomaly": {"DFT": [], "MLIP": [], 
+                                     "MLIP_min": [], "MLIP_max": []},
+                    "adsorbate_migration": {"DFT": [], "MLIP": [], 
+                                          "MLIP_min": [], "MLIP_max": []},
+                    "unphysical_relaxation": {"DFT": [], "MLIP": [], 
+                                            "MLIP_min": [], "MLIP_max": []},
+                    "reproduction_failure": {"DFT": [], "MLIP": [], 
+                                           "MLIP_min": [], "MLIP_max": []},
                 }
             }
 
@@ -1422,16 +1428,16 @@ class AdsorptionAnalysis:
                 if adsorbate and adsorbate in analysis_adsorbates:
                     if adsorbate not in ads_data:
                         ads_data[adsorbate] = {
-                            "normal": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                     "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                            "energy_anomaly": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                             "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                            "adsorbate_migration": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                                  "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                            "unphysical_relaxation": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                                    "MLIP_min": np.array([]), "MLIP_max": np.array([])},
-                            "reproduction_failure": {"DFT": np.array([]), "MLIP": np.array([]), 
-                                                   "MLIP_min": np.array([]), "MLIP_max": np.array([])},
+                            "normal": {"DFT": [], "MLIP": [], 
+                                     "MLIP_min": [], "MLIP_max": []},
+                            "energy_anomaly": {"DFT": [], "MLIP": [], 
+                                             "MLIP_min": [], "MLIP_max": []},
+                            "adsorbate_migration": {"DFT": [], "MLIP": [], 
+                                                  "MLIP_min": [], "MLIP_max": []},
+                            "unphysical_relaxation": {"DFT": [], "MLIP": [], 
+                                                    "MLIP_min": [], "MLIP_max": []},
+                            "reproduction_failure": {"DFT": [], "MLIP": [], 
+                                                   "MLIP_min": [], "MLIP_max": []},
                         }
 
                     classification = anomaly_summary[reaction]["classification"]
@@ -1443,32 +1449,16 @@ class AdsorptionAnalysis:
                         mlip_value = mlip_result[reaction]["final"]["ads_eng_median"]
 
                         # Add to adsorbate-specific data
-                        ads_data[adsorbate][classification]["DFT"] = np.append(
-                            ads_data[adsorbate][classification]["DFT"], dft_value
-                        )
-                        ads_data[adsorbate][classification]["MLIP"] = np.append(
-                            ads_data[adsorbate][classification]["MLIP"], mlip_value
-                        )
-                        ads_data[adsorbate][classification]["MLIP_min"] = np.append(
-                            ads_data[adsorbate][classification]["MLIP_min"], MLIP_min
-                        )
-                        ads_data[adsorbate][classification]["MLIP_max"] = np.append(
-                            ads_data[adsorbate][classification]["MLIP_max"], MLIP_max
-                        )
+                        ads_data[adsorbate][classification]["DFT"].append(dft_value)
+                        ads_data[adsorbate][classification]["MLIP"].append(mlip_value)
+                        ads_data[adsorbate][classification]["MLIP_min"].append(MLIP_min)
+                        ads_data[adsorbate][classification]["MLIP_max"].append(MLIP_max)
 
                         # Add to overall data
-                        ads_data["all"][classification]["DFT"] = np.append(
-                            ads_data["all"][classification]["DFT"], dft_value
-                        )
-                        ads_data["all"][classification]["MLIP"] = np.append(
-                            ads_data["all"][classification]["MLIP"], mlip_value
-                        )
-                        ads_data["all"][classification]["MLIP_min"] = np.append(
-                            ads_data["all"][classification]["MLIP_min"], MLIP_min
-                        )
-                        ads_data["all"][classification]["MLIP_max"] = np.append(
-                            ads_data["all"][classification]["MLIP_max"], MLIP_max
-                        )
+                        ads_data["all"][classification]["DFT"].append(dft_value)
+                        ads_data["all"][classification]["MLIP"].append(mlip_value)
+                        ads_data["all"][classification]["MLIP_min"].append(MLIP_min)
+                        ads_data["all"][classification]["MLIP_max"].append(MLIP_max)
                     except Exception as e:
                         print(f"Error processing reaction {reaction}: {str(e)}")
                         continue
@@ -1511,6 +1501,15 @@ class AdsorptionAnalysis:
 
                     if reaction_anomalies["ads_eng_seed"]:
                         ads_eng_seed += 1
+                        
+            # Convert lists to numpy arrays for all categories
+            for category in ads_data:
+                for classification in ads_data[category]:
+                    for key in ads_data[category][classification]:
+                        ads_data[category][classification][key] = np.array(ads_data[category][classification][key])
+
+            # Cache the mlip_result for later use in Excel generation
+            self._mlip_result_cache[mlip_name] = mlip_result
 
             # Generate plots and calculate MAEs
             all_dft_arrays = [ads_data["all"]["normal"]["DFT"]]
@@ -1563,9 +1562,19 @@ class AdsorptionAnalysis:
                 # Calculate ADwT and AMDwT metrics
                 print(f"  🔧 Calculating ADwT metric for {self._display_mlip_name(mlip_name)}...")
                 adwt_value = self._calculate_adwt(mlip_result, analysis_adsorbates)
+                # Cache ADwT calculations for each adsorbate
+                for adsorbate in analysis_adsorbates:
+                    cache_key = (mlip_name, adsorbate)
+                    if cache_key not in self._adwt_cache:
+                        self._adwt_cache[cache_key] = self._calculate_adwt_by_adsorbate(mlip_result, adsorbate)
 
                 print(f"  🔧 Calculating AMDwT metric for {self._display_mlip_name(mlip_name)}...")
                 amdwt_value = self._calculate_amdwt(mlip_result, analysis_adsorbates)
+                # Cache AMDwT calculations for each adsorbate
+                for adsorbate in analysis_adsorbates:
+                    cache_key = (mlip_name, adsorbate)
+                    if cache_key not in self._amdwt_cache:
+                        self._amdwt_cache[cache_key] = self._calculate_amdwt_by_adsorbate(mlip_result, adsorbate)
 
                 MLIP_datas[mlip_name] = {
                     "total": MAEs_total_multi,
@@ -1639,14 +1648,14 @@ class AdsorptionAnalysis:
         """Create data structure for single calculation plotting."""
         single_data = {
             "all": {
-                "all": {"DFT": np.array([]), "MLIP": np.array([])}
+                "all": {"DFT": [], "MLIP": []}
             }
         }
 
         # Initialize adsorbate-specific data
         for adsorbate in analysis_adsorbates:
             single_data[adsorbate] = {
-                "all": {"DFT": np.array([]), "MLIP": np.array([])}
+                "all": {"DFT": [], "MLIP": []}
             }
 
         # Collect single calculation data
@@ -1670,20 +1679,18 @@ class AdsorptionAnalysis:
                 mlip_value = mlip_result[reaction]["single_calculation"]["ads_eng"]
 
                 # Add to all data
-                single_data["all"]["all"]["DFT"] = np.append(
-                    single_data["all"]["all"]["DFT"], dft_value
-                )
-                single_data["all"]["all"]["MLIP"] = np.append(
-                    single_data["all"]["all"]["MLIP"], mlip_value
-                )
+                single_data["all"]["all"]["DFT"].append(dft_value)
+                single_data["all"]["all"]["MLIP"].append(mlip_value)
 
                 # Add to adsorbate-specific data
-                single_data[adsorbate]["all"]["DFT"] = np.append(
-                    single_data[adsorbate]["all"]["DFT"], dft_value
-                )
-                single_data[adsorbate]["all"]["MLIP"] = np.append(
-                    single_data[adsorbate]["all"]["MLIP"], mlip_value
-                )
+                single_data[adsorbate]["all"]["DFT"].append(dft_value)
+                single_data[adsorbate]["all"]["MLIP"].append(mlip_value)
+
+        # Convert lists to numpy arrays
+        for category in single_data:
+            for subcategory in single_data[category]:
+                for key in single_data[category][subcategory]:
+                    single_data[category][subcategory][key] = np.array(single_data[category][subcategory][key])
 
         return single_data
 
@@ -1925,6 +1932,10 @@ class AdsorptionAnalysis:
 
         Uses vectorized operations for efficient calculation.
         """
+        cache_key = (id(mlip_result), target_adsorbate, 'adwt')
+        if hasattr(self, '_calculation_cache') and cache_key in self._calculation_cache:
+            return self._calculation_cache[cache_key]
+        
         # Pre-collect all position MAE values for this adsorbate once
         pos_mae_values = []
 
@@ -1977,7 +1988,14 @@ class AdsorptionAnalysis:
             dwt_values.append(dwt)
 
         # Calculate ADwT as average of all DwT values
-        return sum(dwt_values) / len(dwt_values)
+        result = sum(dwt_values) / len(dwt_values)
+        
+        # Store in cache
+        if hasattr(self, '_calculation_cache'):
+            cache_key = (id(mlip_result), target_adsorbate, 'adwt')
+            self._calculation_cache[cache_key] = result
+        
+        return result
 
     def _calculate_amdwt_by_adsorbate(self, mlip_result, target_adsorbate):
         """
@@ -1985,6 +2003,10 @@ class AdsorptionAnalysis:
 
         Uses vectorized operations for efficient calculation.
         """
+        cache_key = (id(mlip_result), target_adsorbate, 'amdwt')
+        if hasattr(self, '_calculation_cache') and cache_key in self._calculation_cache:
+            return self._calculation_cache[cache_key]
+        
         # Pre-collect all max displacement values for this adsorbate once
         max_disp_values = []
 
@@ -2037,7 +2059,14 @@ class AdsorptionAnalysis:
             mdwt_values.append(mdwt)
 
         # Calculate AMDwT as average of all MDwT values
-        return sum(mdwt_values) / len(mdwt_values)
+        result = sum(mdwt_values) / len(mdwt_values)
+        
+        # Store in cache
+        if hasattr(self, '_calculation_cache'):
+            cache_key = (id(mlip_result), target_adsorbate, 'amdwt')
+            self._calculation_cache[cache_key] = result
+        
+        return result
 
     def _plot_generator(self, ads_data, single_data, mlip_name, min_value, max_value, mono_path, multi_path):
         """
