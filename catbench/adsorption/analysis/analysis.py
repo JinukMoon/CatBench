@@ -76,9 +76,25 @@ class AdsorptionAnalysis:
         dpi (int, optional): Resolution for saved plots. Default: 300
         min/max (float, optional): Manual axis limits for plots
         font_setting (tuple, optional): Font configuration (path, family)
-        legend_fontsize (int, optional): Legend font size. Default: 20
-        tick_labelsize (int, optional): Tick label size for both x and y axes. Default: 20
-        grid (bool, optional): Show grid on parity plots. Default: True
+        legend_fontsize (int, optional): Legend font size. Default: 25
+        tick_labelsize (int, optional): Tick label size for both x and y axes. Default: 25
+        xlabel_fontsize (int, optional): X-axis label font size. Default: 40
+        ylabel_fontsize (int, optional): Y-axis label font size. Default: 40
+        mae_text_fontsize (int, optional): MAE text font size on plots. Default: 30
+        threshold_xlabel_fontsize (int, optional): X-axis label font size for threshold plots. Default: 40
+        threshold_ylabel_fontsize (int, optional): Y-axis label font size for threshold plots. Default: 40
+        mark_size (int, optional): Marker size for scatter plots. Default: 100
+        linewidths (float, optional): Line width for scatter plot markers. Default: 1.5
+        legend_off (bool, optional): Turn off legend display. Default: False
+        mae_text_off (bool, optional): Turn off MAE text display on plots. Default: False
+        error_bar_display (bool, optional): Display error bars for reproducibility. Default: False
+        specific_color (str, optional): Color for single MLIP plots. Default: "#2077B5"
+        xlabel_off (bool, optional): Turn off x-axis label. Default: False
+        ylabel_off (bool, optional): Turn off y-axis label. Default: False
+        x_tick_bins (int, optional): Number of x-axis tick bins (None = auto). Default: None
+        y_tick_bins (int, optional): Number of y-axis tick bins (None = auto). Default: None
+        tick_decimal_places (int, optional): Decimal places for tick labels (None = auto). Default: None
+        grid (bool, optional): Show grid on parity plots. Default: False
         mlip_name_map (dict, optional): Mapping from raw MLIP names to display names for plots/Excel. Default: {} (no mapping)
         plot_enabled (bool, optional): Whether to generate plots. Default: True
                                      Set to False to skip plot generation during analysis.
@@ -134,6 +150,8 @@ class AdsorptionAnalysis:
         self.xlabel_fontsize = kwargs.get("xlabel_fontsize", get_default("xlabel_fontsize", ANALYSIS_DEFAULTS))
         self.ylabel_fontsize = kwargs.get("ylabel_fontsize", get_default("ylabel_fontsize", ANALYSIS_DEFAULTS))
         self.mae_text_fontsize = kwargs.get("mae_text_fontsize", get_default("mae_text_fontsize", ANALYSIS_DEFAULTS))
+        self.threshold_xlabel_fontsize = kwargs.get("threshold_xlabel_fontsize", get_default("threshold_xlabel_fontsize", ANALYSIS_DEFAULTS))
+        self.threshold_ylabel_fontsize = kwargs.get("threshold_ylabel_fontsize", get_default("threshold_ylabel_fontsize", ANALYSIS_DEFAULTS))
         # Legend marker scaling (fontsize=20, marker_size=100)
         self.legend_markerscale = self.legend_fontsize / 20.0
         # Grid toggle
@@ -300,8 +318,7 @@ class AdsorptionAnalysis:
             ax.set_ylabel(f"{display_name} (eV)", fontsize=self.ylabel_fontsize)
         ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
 
-        plt.tight_layout()
-        plt.savefig(f"{mono_path}/{tag}.png", dpi=self.dpi)
+        plt.savefig(f"{mono_path}/{tag}.png", dpi=self.dpi, bbox_inches='tight')
         plt.close()
 
         return MAE
@@ -434,8 +451,7 @@ class AdsorptionAnalysis:
                 fig_legend.savefig(f"{multi_path}/legend.png", dpi=self.dpi, bbox_inches="tight")
                 plt.close(fig_legend)
 
-        plt.tight_layout()
-        plt.savefig(f"{multi_path}/{tag}.png", dpi=self.dpi)
+        plt.savefig(f"{multi_path}/{tag}.png", dpi=self.dpi, bbox_inches='tight')
         plt.close()
 
         return MAEs
@@ -1256,9 +1272,9 @@ class AdsorptionAnalysis:
 
         # Customize plot
         if not self.xlabel_off:
-            ax.set_xlabel(threshold_label, fontsize=25)
+            ax.set_xlabel(threshold_label, fontsize=self.threshold_xlabel_fontsize)
         if not self.ylabel_off:
-            ax.set_ylabel("Rate (%)", fontsize=25)
+            ax.set_ylabel("Rate (%)", fontsize=self.threshold_ylabel_fontsize)
 
         # Set axis limits based on threshold range
         threshold_min = min(thresholds)
@@ -1302,9 +1318,6 @@ class AdsorptionAnalysis:
         # Set spine properties
         for spine in ax.spines.values():
             spine.set_linewidth(1.5)
-
-        # Tight layout
-        plt.tight_layout()
 
         # Save plot
         if mode == "disp_thrs":

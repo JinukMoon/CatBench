@@ -756,9 +756,9 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | **Plot Axes** | | | |
 | `min` | Minimum value for plot axes | float | None |
 | `max` | Maximum value for plot axes | float | None |
-| `x_tick_bins` | Number of x-axis tick bins | int | 5 |
-| `y_tick_bins` | Number of y-axis tick bins | int | 5 |
-| `tick_decimal_places` | Decimal places for tick labels | int | 1 |
+| `x_tick_bins` | Number of x-axis tick bins (None = auto) | int | None |
+| `y_tick_bins` | Number of y-axis tick bins (None = auto) | int | None |
+| `tick_decimal_places` | Decimal places for tick labels (None = auto) | int | None |
 | `tick_labelsize` | Font size for tick labels | int | 25 |
 | **Font Sizes** | | | |
 | `xlabel_fontsize` | Font size for x-axis labels | int | 40 |
@@ -766,6 +766,8 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `mae_text_fontsize` | Font size for MAE text | int | 30 |
 | `legend_fontsize` | Legend font size | int | 25 |
 | `comparison_legend_fontsize` | Comparison plot legend font size | int | 15 |
+| `threshold_xlabel_fontsize` | X-axis label font size for threshold plots | int | 40 |
+| `threshold_ylabel_fontsize` | Y-axis label font size for threshold plots | int | 40 |
 | **Display Options** | | | |
 | `legend_off` | Hide legends in plots | bool | False |
 | `mae_text_off` | Hide MAE text in plots | bool | False |
@@ -773,10 +775,9 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `xlabel_off` | Hide x-axis labels | bool | False |
 | `ylabel_off` | Hide y-axis labels | bool | False |
 | `grid` | Show grid on plots | bool | False |
-| `plot_enabled` | Generate plots | bool | True |
+| `specific_color` | Color for single MLIP plots | str | "#2077B5" |
 | **Advanced** | | | |
 | `font_setting` | Custom font settings [family, path] | list[str] | False |
-| `mlip_name_map` | Dictionary for MLIP display names | dict[str, str] | {} |
 
 ### DispersionCorrection
 

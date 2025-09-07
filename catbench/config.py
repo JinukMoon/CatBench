@@ -79,6 +79,8 @@ ANALYSIS_DEFAULTS = {
     "ylabel_fontsize": 40,
     "mae_text_fontsize": 30,
     "comparison_legend_fontsize": 15,
+    "threshold_xlabel_fontsize": 40,
+    "threshold_ylabel_fontsize": 40,
     
     # Grid toggle
     "grid": False,
