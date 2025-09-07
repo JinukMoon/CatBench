@@ -756,8 +756,8 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | **Plot Axes** | | | |
 | `min` | Minimum value for plot axes | float | None |
 | `max` | Maximum value for plot axes | float | None |
-| `tick_bins` | Number of tick bins for both axes (None = auto) | int | None |
-| `tick_decimal_places` | Decimal places for tick labels (None = auto) | int | None |
+| `tick_bins` | Number of tick bins for both axes (None = auto) | int | 6 |
+| `tick_decimal_places` | Decimal places for tick labels (None = auto) | int | 1 |
 | `tick_labelsize` | Font size for tick labels | int | 25 |
 | **Font Sizes** | | | |
 | `xlabel_fontsize` | Font size for x-axis labels | int | 40 |

@@ -91,8 +91,8 @@ class AdsorptionAnalysis:
         specific_color (str, optional): Color for single MLIP plots. Default: "#2077B5"
         xlabel_off (bool, optional): Turn off x-axis label. Default: False
         ylabel_off (bool, optional): Turn off y-axis label. Default: False
-        tick_bins (int, optional): Number of tick bins for both axes (None = auto). Default: None
-        tick_decimal_places (int, optional): Decimal places for tick labels (None = auto). Default: None
+        tick_bins (int, optional): Number of tick bins for both axes (None = auto). Default: 6
+        tick_decimal_places (int, optional): Decimal places for tick labels (None = auto). Default: 1
         grid (bool, optional): Show grid on parity plots. Default: False
         mlip_name_map (dict, optional): Mapping from raw MLIP names to display names for plots/Excel. Default: {} (no mapping)
         plot_enabled (bool, optional): Whether to generate plots. Default: True

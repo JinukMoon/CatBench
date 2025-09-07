@@ -66,10 +66,10 @@ ANALYSIS_DEFAULTS = {
     "ylabel_off": False,
     
     # Tick control (None = auto)
-    "tick_bins": None,
+    "tick_bins": 6,
     
     # Tick label decimal places (None = auto)
-    "tick_decimal_places": None,
+    "tick_decimal_places": 1,
     
     # Font sizes
     "legend_fontsize": 25,
