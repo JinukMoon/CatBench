@@ -1336,7 +1336,7 @@ class AdsorptionAnalysis:
         )
         plt.close()
 
-        print(f"  ✅ Saved: {filename}")
+        print(f"  Saved: {filename}")
 
     def _run_analysis(self):
         """Execute comprehensive analysis with anomaly detection and report generation."""
@@ -1575,7 +1575,7 @@ class AdsorptionAnalysis:
                 single_mae_by_adsorbate = self._calculate_single_mae_by_adsorbate(mlip_result, analysis_adsorbates)
 
                 # Calculate ADwT and AMDwT metrics
-                print(f"  🔧 Calculating ADwT metric for {self._display_mlip_name(mlip_name)}...")
+                print(f"  Calculating ADwT metric for {self._display_mlip_name(mlip_name)}...")
                 adwt_value = self._calculate_adwt(mlip_result, analysis_adsorbates)
                 # Cache ADwT calculations for each adsorbate
                 for adsorbate in analysis_adsorbates:
@@ -1583,7 +1583,7 @@ class AdsorptionAnalysis:
                     if cache_key not in self._adwt_cache:
                         self._adwt_cache[cache_key] = self._calculate_adwt_by_adsorbate(mlip_result, adsorbate)
 
-                print(f"  🔧 Calculating AMDwT metric for {self._display_mlip_name(mlip_name)}...")
+                print(f"  Calculating AMDwT metric for {self._display_mlip_name(mlip_name)}...")
                 amdwt_value = self._calculate_amdwt(mlip_result, analysis_adsorbates)
                 # Cache AMDwT calculations for each adsorbate
                 for adsorbate in analysis_adsorbates:
