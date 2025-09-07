@@ -66,8 +66,7 @@ ANALYSIS_DEFAULTS = {
     "ylabel_off": False,
     
     # Tick control (None = auto)
-    "x_tick_bins": None,
-    "y_tick_bins": None,
+    "tick_bins": None,
     
     # Tick label decimal places (None = auto)
     "tick_decimal_places": None,

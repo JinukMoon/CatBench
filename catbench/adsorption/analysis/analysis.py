@@ -91,8 +91,7 @@ class AdsorptionAnalysis:
         specific_color (str, optional): Color for single MLIP plots. Default: "#2077B5"
         xlabel_off (bool, optional): Turn off x-axis label. Default: False
         ylabel_off (bool, optional): Turn off y-axis label. Default: False
-        x_tick_bins (int, optional): Number of x-axis tick bins (None = auto). Default: None
-        y_tick_bins (int, optional): Number of y-axis tick bins (None = auto). Default: None
+        tick_bins (int, optional): Number of tick bins for both axes (None = auto). Default: None
         tick_decimal_places (int, optional): Decimal places for tick labels (None = auto). Default: None
         grid (bool, optional): Show grid on parity plots. Default: False
         mlip_name_map (dict, optional): Mapping from raw MLIP names to display names for plots/Excel. Default: {} (no mapping)
@@ -140,8 +139,7 @@ class AdsorptionAnalysis:
         self.xlabel_off = kwargs.get("xlabel_off", get_default("xlabel_off", ANALYSIS_DEFAULTS))
         self.ylabel_off = kwargs.get("ylabel_off", get_default("ylabel_off", ANALYSIS_DEFAULTS))
         # Tick control (None = auto)
-        self.x_tick_bins = kwargs.get("x_tick_bins", get_default("x_tick_bins", ANALYSIS_DEFAULTS))
-        self.y_tick_bins = kwargs.get("y_tick_bins", get_default("y_tick_bins", ANALYSIS_DEFAULTS))
+        self.tick_bins = kwargs.get("tick_bins", get_default("tick_bins", ANALYSIS_DEFAULTS))
         # Tick label decimal places (None = auto)
         self.tick_decimal_places = kwargs.get("tick_decimal_places", get_default("tick_decimal_places", ANALYSIS_DEFAULTS))
         # Font sizes
@@ -208,11 +206,13 @@ class AdsorptionAnalysis:
         ax.set_xlim(min_value, max_value)
         ax.set_ylim(min_value, max_value)
         ax.plot([min_value, max_value], [min_value, max_value], "r-", zorder=100000)
-        # Tick bins control
-        if self.x_tick_bins is not None:
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=self.x_tick_bins))
-        if self.y_tick_bins is not None:
-            ax.yaxis.set_major_locator(MaxNLocator(nbins=self.y_tick_bins))
+        # Tick bins control - use same locator instance for both axes
+        if self.tick_bins is not None:
+            locator = MaxNLocator(nbins=self.tick_bins)
+        else:
+            locator = MaxNLocator()
+        ax.xaxis.set_major_locator(locator)
+        ax.yaxis.set_major_locator(locator)
         # Tick label formatting
         if self.tick_decimal_places is not None:
             fmt = f"%.{self.tick_decimal_places}f"
@@ -1282,11 +1282,13 @@ class AdsorptionAnalysis:
 
         ax.set_xlim(threshold_min, threshold_max)
         ax.set_ylim(0, 100)
-        # Tick bins control for threshold plot
-        if self.x_tick_bins is not None:
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=self.x_tick_bins))
-        if self.y_tick_bins is not None:
-            ax.yaxis.set_major_locator(MaxNLocator(nbins=self.y_tick_bins))
+        # Tick bins control for threshold plot - use same locator instance for both axes
+        if self.tick_bins is not None:
+            locator = MaxNLocator(nbins=self.tick_bins)
+        else:
+            locator = MaxNLocator()
+        ax.xaxis.set_major_locator(locator)
+        ax.yaxis.set_major_locator(locator)
         # Tick label formatting for threshold plot
         if self.tick_decimal_places is not None:
             fmt = f"%.{self.tick_decimal_places}f"
