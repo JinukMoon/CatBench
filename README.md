@@ -54,7 +54,7 @@ pip install -e .[d3]
 CatBench follows a three-step workflow for comprehensive MLIP evaluation:
 
 1. **Data Processing**: Automated download from CatHub or processing of user VASP calculations
-2. **Calculation**: MLIP-based energy calculations (with optional D3 dispersion correction)
+2. **Calculation**: MLIP-based adsorption and reaction energy calculations
 3. **Analysis**: Statistical evaluation, anomaly detection, and visualization
 
 ## Adsorption Energy Benchmarking
