@@ -1,0 +1,14 @@
+# Override GitHub's language detection
+# Mark header files as vendored or generated to exclude from statistics
+catbench/dispersion/cuda/**/*.h linguist-vendored
+catbench/dispersion/cuda/**/*.cu linguist-vendored
+
+# Alternatively, mark them as generated
+# catbench/dispersion/cuda/pair_e3gnn/pair_d3_pars.h linguist-generated
+
+# Ensure Python files are properly detected
+*.py linguist-language=Python
+*.ipynb linguist-language=Jupyter Notebook
+
+# Mark documentation
+*.md linguist-documentation
