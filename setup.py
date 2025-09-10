@@ -28,6 +28,8 @@ setup(
         "matplotlib>=3.4.0",
         "requests>=2.25.0",
         "xlsxwriter>=3.2.0",
+        "pyyaml>=5.4.0",
+        "scipy>=1.7.0",
     ],
     extras_require={
         "d3": [

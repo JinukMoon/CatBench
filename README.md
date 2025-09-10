@@ -135,21 +135,26 @@ your_dataset_name/  # You can use any name for this folder
 
 Process the data with coefficient settings:
 
+> ⚠️ **Critical: Required Keywords**
+> - `"slab"` and `"adslab"` are **mandatory fixed keywords** - do NOT change these names
+> - Gas phase references **must end with "gas"** suffix (e.g., "H2gas", "COgas", "H2Ogas")
+> - These naming conventions are hard-coded in CatBench and changing them will cause errors
+
 ```python
 from catbench.adsorption import vasp_preprocessing
 
 # Define reaction stoichiometry
 coeff_setting = {
     "H": {
-        "slab": -1,      # E(slab)
-        "adslab": 1,     # E(H*)
-        "H2gas": -1/2,   # -1/2 E(H2)
+        "slab": -1,      # E(slab) - REQUIRED: must be exactly "slab"
+        "adslab": 1,     # E(H*) - REQUIRED: must be exactly "adslab"
+        "H2gas": -1/2,   # -1/2 E(H2) - REQUIRED: must end with "gas"
     },
     "OH": {
-        "slab": -1,      
-        "adslab": 1,     
-        "H2gas": +1/2,   
-        "H2Ogas": -1,    
+        "slab": -1,      # REQUIRED: must be exactly "slab"
+        "adslab": 1,     # REQUIRED: must be exactly "adslab"
+        "H2gas": +1/2,   # REQUIRED: must end with "gas"
+        "H2Ogas": -1,    # REQUIRED: must end with "gas"
     },
 }
 
@@ -867,6 +872,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Contact
 
 **Jinuk Moon** - [jumoon@snu.ac.kr](mailto:jumoon@snu.ac.kr)  
+**Jeong Woo Han** - [jwhan98@snu.ac.kr](mailto:jwhan98@snu.ac.kr)  
 Seoul National University
 
 ---
