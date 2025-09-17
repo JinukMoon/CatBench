@@ -152,7 +152,11 @@ class AdsorptionCalculation:
     def _setup_directories(self, mode_suffix=""):
         """Setup output directories."""
         save_directory = get_result_directory(self.mlip_name, mode_suffix=mode_suffix)
-        create_calculation_directories(save_directory)
+        # Always create base directory for result.json
+        os.makedirs(save_directory, exist_ok=True)
+        # Only create subdirectories if save_files is True
+        if self.config.get("save_files", True):
+            create_calculation_directories(save_directory)
         return save_directory
     
     def _load_existing_results(self, save_directory):
@@ -180,15 +184,16 @@ class AdsorptionCalculation:
                 print(f"Skipping already calculated {key}")
                 continue
                 
-            # Clean up any incomplete attempts
-            log_path = f"{save_directory}/log/{key}"
-            traj_path = f"{save_directory}/traj/{key}"
-            if os.path.exists(log_path):
-                shutil.rmtree(log_path)
-                print(f"Removed existing log directory for {key}")
-            if os.path.exists(traj_path):
-                shutil.rmtree(traj_path)
-                print(f"Removed existing trajectory directory for {key}")
+            # Clean up any incomplete attempts (only if save_files is True)
+            if self.config.get("save_files", True):
+                log_path = f"{save_directory}/log/{key}"
+                traj_path = f"{save_directory}/traj/{key}"
+                if os.path.exists(log_path):
+                    shutil.rmtree(log_path)
+                    print(f"Removed existing log directory for {key}")
+                if os.path.exists(traj_path):
+                    shutil.rmtree(traj_path)
+                    print(f"Removed existing trajectory directory for {key}")
             
             try:
                 print(f"[{index+1}/{len(ref_data)}] {key}")
@@ -283,11 +288,15 @@ class AdsorptionCalculation:
             "adslab_tot_eng": adslab_energy_single,
         }
         
-        # Setup paths
-        traj_path = f"{save_directory}/traj/{key}"
-        log_path = f"{save_directory}/log/{key}"
-        os.makedirs(traj_path, exist_ok=True)
-        os.makedirs(log_path, exist_ok=True)
+        # Setup paths (conditionally based on save_files)
+        if self.config.get("save_files", True):
+            traj_path = f"{save_directory}/traj/{key}"
+            log_path = f"{save_directory}/log/{key}"
+            os.makedirs(traj_path, exist_ok=True)
+            os.makedirs(log_path, exist_ok=True)
+        else:
+            traj_path = None
+            log_path = None
         
         # Calculate z_target for fixing atoms
         POSCAR_star = reaction_data["raw"]["star"]["atoms"]
@@ -339,8 +348,8 @@ class AdsorptionCalculation:
                         self.config["damping"],
                         z_target,
                         self.config["optimizer"],
-                        f"{log_path}/{structure}_{i}.txt",
-                        f"{traj_path}/{structure}_{i}",
+                        f"{log_path}/{structure}_{i}.txt" if log_path else None,
+                        f"{traj_path}/{structure}_{i}" if traj_path else None,
                     )
                     
                     ads_energy_calc += energy_calculated * reaction_data["raw"][structure]["stoi"]
@@ -375,18 +384,29 @@ class AdsorptionCalculation:
                         ads_energy_calc += gas_energies[gas_tag] * reaction_data["raw"][structure]["stoi"]
                     else:
                         print(f"{gas_tag} calculating")
-                        gas_CONTCAR, gas_energy = energy_cal_gas(
-                            self.calculators[i],
-                            reaction_data["raw"][structure]["atoms"],
-                            self.config["f_crit_relax"],
-                            f"{save_directory}/gases/POSCARs/POSCAR_{gas_tag}",
-                            self.config["optimizer"],
-                            f"{save_directory}/gases/log/{gas_tag}.txt",
-                            f"{save_directory}/gases/traj/{gas_tag}",
-                        )
+                        if self.config.get("save_files", True):
+                            gas_CONTCAR, gas_energy = energy_cal_gas(
+                                self.calculators[i],
+                                reaction_data["raw"][structure]["atoms"],
+                                self.config["f_crit_relax"],
+                                f"{save_directory}/gases/POSCARs/POSCAR_{gas_tag}",
+                                self.config["optimizer"],
+                                f"{save_directory}/gases/log/{gas_tag}.txt",
+                                f"{save_directory}/gases/traj/{gas_tag}",
+                            )
+                            write(f"{save_directory}/gases/CONTCARs/CONTCAR_{gas_tag}", gas_CONTCAR)
+                        else:
+                            gas_CONTCAR, gas_energy = energy_cal_gas(
+                                self.calculators[i],
+                                reaction_data["raw"][structure]["atoms"],
+                                self.config["f_crit_relax"],
+                                None,  # No save path
+                                self.config["optimizer"],
+                                None,  # No log path
+                                None,  # No trajectory path
+                            )
                         gas_energies[gas_tag] = gas_energy
                         ads_energy_calc += gas_energy * reaction_data["raw"][structure]["stoi"]
-                        write(f"{save_directory}/gases/CONTCARs/CONTCAR_{gas_tag}", gas_CONTCAR)
             
             # Calculate bond change and substrate displacement
             max_bond_change = 0.0
@@ -543,11 +563,15 @@ class AdsorptionCalculation:
             "ads_eng": ads_energy_single,
         }
         
-        # Setup paths
-        traj_path = f"{save_directory}/traj/{key}"
-        log_path = f"{save_directory}/log/{key}"
-        os.makedirs(traj_path, exist_ok=True)
-        os.makedirs(log_path, exist_ok=True)
+        # Setup paths (conditionally based on save_files)
+        if self.config.get("save_files", True):
+            traj_path = f"{save_directory}/traj/{key}"
+            log_path = f"{save_directory}/log/{key}"
+            os.makedirs(traj_path, exist_ok=True)
+            os.makedirs(log_path, exist_ok=True)
+        else:
+            traj_path = None
+            log_path = None
         
         POSCAR_star = reaction_data["raw"]["star"]["atoms"]
         z_target = fix_z(POSCAR_star, self.config["rate"])
@@ -587,8 +611,8 @@ class AdsorptionCalculation:
                         self.config["damping"],
                         z_target,
                         self.config["optimizer"],
-                        f"{log_path}/{structure}_{i}.txt",
-                        f"{traj_path}/{structure}_{i}",
+                        f"{log_path}/{structure}_{i}.txt" if log_path else None,
+                        f"{traj_path}/{structure}_{i}" if traj_path else None,
                     )
                     time_consumed += time_calculated
                     

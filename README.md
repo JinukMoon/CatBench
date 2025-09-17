@@ -189,6 +189,8 @@ config = {
     "mlip_name": "YourMLIP",
     "benchmark": "dataset_name",
     # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixing constraints
+    # "save_files": False,  # Set to False to save disk space by skipping trajectory/log files
+    # For all available configuration options, see the Configuration Options section below
 }
 
 adsorption_calc = AdsorptionCalculation(calculators, **config)
@@ -218,6 +220,8 @@ config = {
     "mlip_name": "YourMLIP_D3",
     "benchmark": "dataset_name",
     # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixed atoms
+    # "save_files": False,  # Set to False to save disk space by skipping trajectory/log files
+    # For all available configuration options, see the Configuration Options section below
 }
 adsorption_calc = AdsorptionCalculation(calculators, **config)
 adsorption_calc.run()
@@ -243,6 +247,8 @@ config = {
     "mlip_name": "OC20_MLIP",
     "benchmark": "dataset_name",
     # "rate": None,  # IMPORTANT: Use None to preserve VASP's original fixed atoms
+    # "save_files": False,  # Set to False to save disk space by skipping trajectory/log files
+    # For all available configuration options, see the Configuration Options section below
 }
 adsorption_calc = AdsorptionCalculation(calculators, mode="oc20", **config)
 adsorption_calc.run()
@@ -732,7 +738,8 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `rate` | Fraction of atoms to fix (0: no atoms fixed, None: preserve original constraints) | float | 0.5 |
 | `damping` | Optimization damping factor | float | 1.0 |
 | `optimizer` | ASE optimizer: "LBFGS", "BFGS", "FIRE" | str | "LBFGS" |
-| `save_step` | Save interval for checkpointing | int | 50 |
+| `save_step` | Save interval for updating result.json file | int | 50 |
+| `save_files` | Save trajectory, log, and gas files (False: only result.json) | bool | True |
 | `chemical_bond_cutoff` | Cutoff distance for bond change calculation (Å) | float | 6.0 |
 
 ### AdsorptionAnalysis

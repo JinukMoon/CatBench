@@ -41,8 +41,8 @@ def energy_cal_gas(
     f_crit_relax,
     save_path,
     optimizer,
-    log_path="no",
-    filename="",
+    log_path=None,
+    filename=None,
 ):
     """Calculate energy for gas-phase molecules."""
     optimizer_classes = {
@@ -68,27 +68,36 @@ def energy_cal_gas(
         atoms.set_constraint(c)
         tags = np.ones(len(atoms))
         atoms.set_tags(tags)
-        
-        write(save_path, atoms)
 
-        time_init = time.time()
-        logfile = open(log_path, "w", buffering=1)
-        logfile.write("######################\n")
-        logfile.write("##  MLIP relax starts  ##\n")
-        logfile.write("######################\n")
-        logfile.write("\nStep 1. Relaxing\n")
+        if save_path is not None:
+            write(save_path, atoms)
 
-        opt = opt_class(atoms, logfile=logfile, trajectory=filename)
-        opt.run(fmax=f_crit_relax, steps=500)
+        if log_path is not None and filename is not None:
+            logfile = open(log_path, "w", buffering=1)
+            logfile.write("######################\n")
+            logfile.write("##  MLIP relax starts  ##\n")
+            logfile.write("######################\n")
+            logfile.write("\nStep 1. Relaxing\n")
 
-        convert_trajectory(filename)
-        logfile.write("Done!\n")
-        elapsed_time = time.time() - time_init
-        logfile.write(f"\nElapsed time: {elapsed_time} s\n\n")
-        logfile.write("###############################\n")
-        logfile.write("##  Relax terminated normally  ##\n")
-        logfile.write("###############################\n")
-        logfile.close()
+            opt = opt_class(atoms, logfile=logfile, trajectory=filename)
+            time_init = time.time()
+            opt.run(fmax=f_crit_relax, steps=500)
+            elapsed_time = time.time() - time_init
+
+            convert_trajectory(filename)
+            logfile.write("Done!\n")
+            logfile.write(f"\nElapsed time: {elapsed_time} s\n\n")
+            logfile.write("###############################\n")
+            logfile.write("##  Relax terminated normally  ##\n")
+            logfile.write("###############################\n")
+            logfile.close()
+        else:
+            # Run without saving log/trajectory
+            opt = opt_class(atoms, logfile=None, trajectory=None)
+            time_init = time.time()
+            opt.run(fmax=f_crit_relax, steps=500)
+            elapsed_time = time.time() - time_init
+
         return atoms, atoms.get_potential_energy()
 
 
@@ -109,8 +118,8 @@ def energy_cal(
     damping,
     z_target,
     optimizer,
-    logfile="",
-    filename="",
+    logfile=None,
+    filename=None,
 ):
     """Calculate energy with structure optimization."""
     atoms = deepcopy(atoms_origin)
@@ -134,22 +143,24 @@ def energy_cal(
     if optimizer in optimizer_classes:
         opt_class = optimizer_classes[optimizer]
 
-        if logfile == "no":
-            opt = opt_class(atoms, logfile=None)
-            opt.run(fmax=f_crit_relax, steps=n_crit_relax)
-            elapsed_time = 0
-        else:
+        if logfile is None or filename is None:
+            # Run without saving log/trajectory
+            opt = opt_class(atoms, logfile=None, trajectory=None)
             time_init = time.time()
+            opt.run(fmax=f_crit_relax, steps=n_crit_relax)
+            elapsed_time = time.time() - time_init
+        else:
             logfile = open(logfile, "w", buffering=1)
             logfile.write("######################\n")
             logfile.write("##  MLIP relax starts  ##\n")
             logfile.write("######################\n")
             logfile.write("\nStep 1. Relaxing\n")
             opt = opt_class(atoms, logfile=logfile, trajectory=filename)
+            time_init = time.time()
             opt.run(fmax=f_crit_relax, steps=n_crit_relax)
+            elapsed_time = time.time() - time_init
             convert_trajectory(filename)
             logfile.write("Done!\n")
-            elapsed_time = time.time() - time_init
             logfile.write(f"\nElapsed time: {elapsed_time} s\n\n")
             logfile.write("###############################\n")
             logfile.write("##  Relax terminated normally  ##\n")

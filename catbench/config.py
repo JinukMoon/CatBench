@@ -15,13 +15,14 @@ CALCULATION_DEFAULTS = {
     # Optimizer settings
     "optimizer": "LBFGS",
     "save_step": 50,  # Save results every N calculations
-    
+    "save_files": True,  # Save trajectory, log, and gas files (False: save only result.json)
+
     # Optimization parameters
     "f_crit_relax": 0.05,
     "n_crit_relax": 999,
     "rate": 0.5,
     "damping": 1.0,
-    
+
     # Bond analysis
     "chemical_bond_cutoff": 6.0,  # Chemical bond cutoff in Å for max_bond_change calculation
 }
