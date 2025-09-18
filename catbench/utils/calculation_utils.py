@@ -13,7 +13,7 @@ from copy import deepcopy
 import numpy as np
 from ase.constraints import FixAtoms
 from ase.io import read, write
-from ase.optimize import LBFGS, BFGS, GPMin, FIRE, MDMin, BFGSLineSearch
+from ase.optimize import LBFGS, BFGS, GPMin, FIRE, MDMin, BFGSLineSearch, LBFGSLineSearch
 
 
 def convert_trajectory(filename):
@@ -52,6 +52,7 @@ def energy_cal_gas(
         "FIRE": FIRE,
         "MDMin": MDMin,
         "BFGSLineSearch": BFGSLineSearch,
+        "LBFGSLineSearch": LBFGSLineSearch,
     }
 
     if optimizer in optimizer_classes:
@@ -138,6 +139,7 @@ def energy_cal(
         "FIRE": FIRE,
         "MDMin": MDMin,
         "BFGSLineSearch": BFGSLineSearch,
+        "LBFGSLineSearch": LBFGSLineSearch,
     }
 
     if optimizer in optimizer_classes:

@@ -737,7 +737,7 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `n_crit_relax` | Maximum optimization steps | int | 999 |
 | `rate` | Fraction of atoms to fix (0: no atoms fixed, None: preserve original constraints) | float | 0.5 |
 | `damping` | Optimization damping factor | float | 1.0 |
-| `optimizer` | ASE optimizer: "LBFGS", "BFGS", "FIRE" | str | "LBFGS" |
+| `optimizer` | ASE optimizer: "LBFGS", "LBFGSLineSearch", "BFGS", "BFGSLineSearch", "GPMin", "MDMin", "FIRE" | str | "LBFGS" |
 | `save_step` | Save interval for updating result.json file | int | 50 |
 | `save_files` | Save trajectory, log, and gas files (False: only result.json) | bool | True |
 | `chemical_bond_cutoff` | Cutoff distance for bond change calculation (Å) | float | 6.0 |
