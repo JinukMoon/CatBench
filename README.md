@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/JinukMoon/CatBench)
 
-**CatBench: Benchmark framework of Machine Learning Interatomic Potentials for Adsorption Energy Predictions in Heterogeneous Catalysis**
+**CatBench Framework for Benchmarking Machine Learning Interatomic Potentials in Adsorption Energy Predictions for Heterogeneous Catalysis**
 
 CatBench provides a unified framework for evaluating MLIP performance across diverse catalytic systems, offering automated data processing, calculation workflows, and comprehensive analysis tools for adsorption energies, surface energies, bulk formation energies, and equation of state properties.
 
@@ -864,11 +864,10 @@ If you use CatBench in your research, please cite:
 
 ```bibtex
 @article{catbench2025,
-  title={CatBench: Benchmark Framework of Machine Learning Interatomic Potentials for Adsorption Energy Predictions in Heterogeneous Catalysis},
+  title={CatBench Framework for Benchmarking Machine Learning Interatomic Potentials in Adsorption Energy Predictions for Heterogeneous Catalysis},
   author={Moon, Jinuk and Jeon, Uchan and Choung, Seokhyun and Han, Jeong Woo},
   journal={Cell Reports Physical Science},
-  year={2025},
-  note={In revision}
+  year={2025}
 }
 ```
 
