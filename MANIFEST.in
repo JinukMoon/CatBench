@@ -1,0 +1,21 @@
+# Include documentation and license
+include README.md
+include LICENSE
+include requirements.txt
+
+# Include assets for documentation
+recursive-include assets *.png
+
+# Include CUDA compiled libraries and source files
+recursive-include catbench/dispersion/cuda *.so
+recursive-include catbench/dispersion/cuda *.cu
+recursive-include catbench/dispersion/cuda *.h
+recursive-include catbench/dispersion/cuda *.cpp
+
+# Include all Python files (backup, though setuptools handles this)
+recursive-include catbench *.py
+
+# Exclude unnecessary files
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
