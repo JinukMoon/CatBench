@@ -1,6 +1,6 @@
 # CatBench
 
-![CatBench Logo](assets/CatBench_logo.png)
+<img src="assets/CatBench_logo.png" alt="CatBench Logo" width="600"/>
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
