@@ -27,3 +27,8 @@ venv/
 .DS_Store
 *.tmp
 *.temp
+
+# Claude Code
+CLAUDE.md
+.claude/
+.claude*

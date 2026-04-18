@@ -64,9 +64,37 @@ CatBench follows a three-step workflow for comprehensive MLIP evaluation:
 
 ### Data Preparation
 
-#### Option A: CatHub Database
+#### Option A: Pre-formatted Zenodo Download (Fastest, Recommended)
 
-Download and preprocess catalysis reaction data directly from CatHub:
+The five main benchmark datasets used in the CatBench publication are hosted as pre-processed JSON files on Zenodo ([DOI: 10.5281/zenodo.17157086](https://zenodo.org/records/17157086)). No CatHub scraping, no preprocessing — files are downloaded directly into `raw_data/` and are immediately usable:
+
+```python
+from catbench.adsorption import zenodo_download, list_zenodo_benchmarks
+
+# See the 5 available benchmark datasets
+list_zenodo_benchmarks()
+# → ['BM_dataset', 'ComerGeneralized2024', 'FG_dataset', 'KHLOHC_origin', 'MamunHighT2019']
+
+# Download one (MD5-verified automatically)
+zenodo_download("MamunHighT2019")
+# → raw_data/MamunHighT2019_adsorption.json (195 MB)
+
+# Pass overwrite=True to force redownload; verify=False to skip hash check
+```
+
+| Benchmark | Size | Description |
+|-----------|------|-------------|
+| MamunHighT2019       | 195 MB | 45,130 small-molecule adsorption reactions on 2,035 bimetallic alloy surfaces |
+| FG_dataset           | 15 MB  | 2,651 C1–C10 organic molecules with diverse functional groups on transition metals |
+| KHLOHC_origin        | 11 MB  | Liquid organic hydrogen carrier adsorption (for fine-tuning demonstrations) |
+| ComerGeneralized2024 | 2 MB   | 325 adsorption reactions on metal oxide surfaces |
+| BM_dataset           | 0.4 MB | 32 extended large-molecule adsorption systems (biomass conversion, polyurethane, plastic recycling) |
+
+After download, proceed directly to [Calculation](#calculation) — no further preprocessing needed.
+
+#### Option B: CatHub Database
+
+For benchmarks not included in the Zenodo collection, download and preprocess reaction data directly from CatHub:
 
 ```python
 from catbench.adsorption import cathub_preprocessing
@@ -81,7 +109,15 @@ cathub_preprocessing(
 )
 ```
 
-#### Option B: User VASP Data
+#### Option C: User VASP Data
+
+> 🚨 **CRITICAL — Use `rate=None` in `AdsorptionCalculation`**
+>
+> When running calculations on your own VASP data, you **must** pass `rate=None` to `AdsorptionCalculation`. This preserves the exact Selective-Dynamics (T/F) constraints you set in your original VASP POSCARs — which encode the physically meaningful choice of which atoms to relax (e.g., bottom slab layers fixed, top layers + adsorbate free).
+>
+> The default `rate=0.5` ignores your VASP constraints and fixes the bottom 50% of atoms by z-coordinate instead. For CatHub/Zenodo data this is appropriate (that's how those reference calculations were run), but for user VASP data it **silently overrides your physics** and will produce energies inconsistent with your DFT references. This is the single most common source of "why don't my MLIP results match my DFT?" confusion.
+>
+> Always use `rate=None` for user VASP data. No exceptions.
 
 > ⚠️ **Important**: The VASP preprocessing functions will DELETE all files except CONTCAR and OSZICAR to save disk space. **Always work with a copy of your original VASP data!**
 
@@ -738,7 +774,7 @@ The Excel report includes comprehensive EOS analysis with Birch-Murnaghan equati
 | `mode` | Calculation mode: "basic" or "oc20" | str | "basic" |
 | `f_crit_relax` | Force convergence criterion (eV/Å) | float | 0.05 |
 | `n_crit_relax` | Maximum optimization steps | int | 999 |
-| `rate` | Fraction of atoms to fix (0: no atoms fixed, None: preserve original constraints) | float | 0.5 |
+| `rate` | Fraction of atoms to fix (0: no atoms fixed, None: preserve original constraints). **⚠️ For user VASP data, you must set this to `None`** — see the warning in [Option C: User VASP Data](#option-c-user-vasp-data). | float | 0.5 |
 | `damping` | Optimization damping factor | float | 1.0 |
 | `optimizer` | ASE optimizer: "LBFGS", "LBFGSLineSearch", "BFGS", "BFGSLineSearch", "GPMin", "MDMin", "FIRE" | str | "LBFGS" |
 | `save_step` | Save interval for updating result.json file | int | 50 |

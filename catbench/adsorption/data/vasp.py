@@ -220,6 +220,42 @@ def userdata_preprocess(dataset_name):
     save_catbench_json(data_total, path_output)
 
 
+def _validate_vasp_inputs(dataset_name, coeff_setting):
+    if not isinstance(dataset_name, str):
+        raise TypeError(
+            f"dataset_name must be str, got {type(dataset_name).__name__}"
+        )
+    if not os.path.isdir(dataset_name):
+        raise FileNotFoundError(f"Dataset directory not found: {dataset_name}")
+
+    if not isinstance(coeff_setting, dict) or not coeff_setting:
+        raise ValueError("coeff_setting must be a non-empty dict")
+
+    for ads, coeffs in coeff_setting.items():
+        if not isinstance(coeffs, dict):
+            raise ValueError(
+                f"coeff_setting['{ads}'] must be a dict, got "
+                f"{type(coeffs).__name__}"
+            )
+        missing = {"slab", "adslab"} - set(coeffs.keys())
+        if missing:
+            raise ValueError(
+                f"coeff_setting['{ads}'] is missing required keys: "
+                f"{sorted(missing)}. Every adsorbate entry must include "
+                f"'slab' and 'adslab'."
+            )
+        bad_gas_keys = [
+            k for k in coeffs
+            if k not in {"slab", "adslab"} and not k.endswith("gas")
+        ]
+        if bad_gas_keys:
+            raise ValueError(
+                f"coeff_setting['{ads}'] has gas reference keys not ending "
+                f"with 'gas': {bad_gas_keys}. Gas references must use 'gas' "
+                f"suffix (e.g., 'H2gas', 'H2Ogas')."
+            )
+
+
 def vasp_preprocessing(dataset_name, coeff_setting):
     """
     Complete VASP data processing pipeline for MLIP benchmarking.
@@ -288,6 +324,8 @@ def vasp_preprocessing(dataset_name, coeff_setting):
         reactions with inconsistent energy balance. Each reaction must satisfy
         energy conservation within numerical precision.
     """
+    _validate_vasp_inputs(dataset_name, coeff_setting)
+
     print("Step 1: Cleaning VASP output files...")
     process_output(dataset_name, coeff_setting)
     

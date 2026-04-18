@@ -202,7 +202,7 @@ class AdsorptionCalculation:
                 
                 # Save results every save_step calculations
                 if len(final_result) % self.config["save_step"] == 0:
-                    print(f"💾 Saving results at {len(final_result)} calculations...")
+                    print(f"Saving results at {len(final_result)} calculations...")
                     self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single)
                 
             except Exception as e:
@@ -211,7 +211,7 @@ class AdsorptionCalculation:
                 continue
         
         # Final save to ensure all results are saved
-        print(f"💾 Final save: {len(final_result)} total calculations")
+        print(f"Final save: {len(final_result)} total calculations")
         self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single)
         
         print(f"{self.mlip_name} Benchmarking Finish")
@@ -522,7 +522,7 @@ class AdsorptionCalculation:
                 
                 # Save results every save_step calculations
                 if len(final_result) % self.config["save_step"] == 0:
-                    print(f"💾 Saving results at {len(final_result)} calculations...")
+                    print(f"Saving results at {len(final_result)} calculations...")
                     self._save_results_oc20(save_directory, final_result)
                 
             except Exception as e:
@@ -531,7 +531,7 @@ class AdsorptionCalculation:
                 continue
         
         # Final save to ensure all results are saved
-        print(f"💾 Final save: {len(final_result)} total calculations")
+        print(f"Final save: {len(final_result)} total calculations")
         self._save_results_oc20(save_directory, final_result)
         
         print(f"{self.mlip_name} Benchmarking Finish")
