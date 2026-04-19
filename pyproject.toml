@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "catbench"
-version = "1.0.0"
+version = "1.0.1"
 description = "CatBench Framework for Benchmarking Machine Learning Interatomic Potentials in Adsorption Energy Predictions for Heterogeneous Catalysis"
 readme = "README.md"
 requires-python = ">=3.8"
