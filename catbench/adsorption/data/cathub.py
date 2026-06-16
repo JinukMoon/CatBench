@@ -23,7 +23,15 @@ GRAPHQL = "http://api.catalysis-hub.org/graphql"
 
 def fetch(query):
     """Fetch data from CatHub GraphQL API."""
-    return requests.get(GRAPHQL, {"query": query}).json()["data"]
+    resp = requests.get(GRAPHQL, {"query": query}, timeout=120)
+    resp.raise_for_status()
+    payload = resp.json()
+    # CatHub returns {"data": null, "errors": [...]} on query errors. Surface a
+    # clear message instead of an opaque KeyError/'NoneType' downstream.
+    if payload.get("data") is None:
+        errors = payload.get("errors")
+        raise RuntimeError(f"CatHub GraphQL query returned no data; errors: {errors}")
+    return payload["data"]
 
 
 def reactions_from_dataset(pub_id, page_size=40, logger=None):
@@ -88,8 +96,9 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
         downloaded_so_far = page_size * page if page_size * page < total_count else total_count
 
         if logger:
+            pct = (downloaded_so_far / total_count * 100) if total_count else 0.0
             logger.info(f"Downloaded {downloaded_so_far}/{total_count} reactions for {pub_id} "
-                       f"({downloaded_so_far/total_count*100:.1f}% complete)")
+                       f"({pct:.1f}% complete)")
 
         # Dedup by CatHub reaction id as a safety net against any residual
         # pagination overlap. With `order: "id"` this should never trigger.
@@ -285,15 +294,17 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None):
         # Setup logging if not already done (e.g., no download was needed)
         if logger is None:
             log_file = os.path.join(save_directory, f"{output_name}_preprocessing.log")
-            logging.basicConfig(
-                level=logging.INFO,
-                format='%(asctime)s - %(levelname)s - %(message)s',
-                handlers=[
-                    logging.FileHandler(log_file, mode='w', encoding='utf-8')
-                    # Console output removed for cleaner debugging
-                ]
-            )
-            logger = logging.getLogger(__name__)
+            # Use a dedicated named logger with an explicit FileHandler instead of
+            # logging.basicConfig, which mutates the root logger (no-op if already
+            # configured, double-logs in notebooks).
+            logger = logging.getLogger(f"catbench_{output_name}")
+            logger.setLevel(logging.INFO)
+            if logger.hasHandlers():
+                logger.handlers.clear()
+            handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+            logger.addHandler(handler)
+            logger.propagate = False
             logger.info(f"Starting CatHub preprocessing for benchmark: {benchmark}")
         
         # Continue with processing logs

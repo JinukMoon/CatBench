@@ -68,11 +68,15 @@ def save_json(data: Dict[str, Any], filepath: str, use_numpy_encoder: bool = Tru
         filepath: Path to save JSON file
         use_numpy_encoder: Whether to use NumpyEncoder for numpy arrays
     """
-    with open(filepath, "w") as f:
+    # Write to a temp file then atomically replace, so a kill mid-write cannot
+    # corrupt an existing result file (os.replace is atomic on POSIX).
+    tmp_path = filepath + ".tmp"
+    with open(tmp_path, "w") as f:
         if use_numpy_encoder:
             json.dump(data, f, indent=4, cls=NumpyEncoder)
         else:
             json.dump(data, f, indent=4)
+    os.replace(tmp_path, filepath)
 
 
 def load_json(filepath: str, default: Optional[Dict] = None) -> Dict[str, Any]:

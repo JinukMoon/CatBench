@@ -53,14 +53,17 @@ def surface_energy_cathub_preprocessing(benchmark, save_directory="raw_data"):
     # Setup logging
     os.makedirs(save_directory, exist_ok=True)
     log_file = os.path.join(save_directory, f"{benchmark}_surface_energy_preprocessing.log")
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, mode='w', encoding='utf-8')
-        ]
-    )
-    logger = logging.getLogger(__name__)
+    # Use a dedicated named logger with an explicit FileHandler instead of
+    # logging.basicConfig, which mutates the root logger (no-op if already
+    # configured, double-logs in notebooks).
+    logger = logging.getLogger(f"catbench_surface_energy_{benchmark}")
+    logger.setLevel(logging.INFO)
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(handler)
+    logger.propagate = False
     
     logger.info(f"Starting CatHub surface energy preprocessing for benchmark: {benchmark}")
     

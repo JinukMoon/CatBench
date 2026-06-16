@@ -46,14 +46,17 @@ def eos_vasp_preprocessing(dataset_name, save_directory="raw_data"):
     os.makedirs(save_directory, exist_ok=True)
     dataset_basename = os.path.basename(dataset_name.rstrip('/'))
     log_file = os.path.join(save_directory, f"{dataset_basename}_eos_preprocessing.log")
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, mode='w', encoding='utf-8')
-        ]
-    )
-    logger = logging.getLogger(__name__)
+    # Use a dedicated named logger with an explicit FileHandler instead of
+    # logging.basicConfig, which mutates the root logger (no-op if already
+    # configured, double-logs in notebooks).
+    logger = logging.getLogger(f"catbench_eos_{dataset_basename}")
+    logger.setLevel(logging.INFO)
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(handler)
+    logger.propagate = False
     
     logger.info(f"Starting VASP EOS preprocessing for dataset: {dataset_name}")
     
@@ -201,21 +204,23 @@ def _read_energy_from_oszicar(oszicar_path):
     with open(oszicar_path, 'r') as f:
         lines = f.readlines()
     
-    # Find the last line with E0
+    # Find the last line with E0 (robust to glued "E0=-0.123" as well)
     for line in reversed(lines):
         if 'E0=' in line:
-            # E0= value is after 'E0='
-            parts = line.split('E0=')[1].split()
-            return float(parts[0])
-    
-    # Alternative format: last line with numerical values
+            after = line.split('E0=')[1].split()
+            if after:
+                return float(after[0])
+
+    # Stricter fallback: only parse a line that actually carries an energy
+    # marker. Blindly reading the 3rd column of any numeric line can return a
+    # wrong number (e.g. dE/temperature columns), so require an explicit marker.
     for line in reversed(lines):
-        parts = line.split()
-        if len(parts) > 2:
-            try:
-                # Try to parse the 3rd column (usually energy)
-                return float(parts[2])
-            except ValueError:
-                continue
-    
+        if 'F=' in line:
+            parts = line.split('F=')[1].split()
+            if parts:
+                try:
+                    return float(parts[0])
+                except ValueError:
+                    continue
+
     raise ValueError(f"Could not find energy in {oszicar_path}")

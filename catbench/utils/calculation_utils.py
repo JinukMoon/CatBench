@@ -31,8 +31,12 @@ class NumpyEncoder(json.JSONEncoder):
             return int(obj)
         elif isinstance(obj, np.floating):
             return float(obj)
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
+        elif isinstance(obj, np.generic):
+            return obj.item()
         return json.JSONEncoder.default(self, obj)
 
 
@@ -55,6 +59,11 @@ def energy_cal_gas(
         "BFGSLineSearch": BFGSLineSearch,
         "LBFGSLineSearch": LBFGSLineSearch,
     }
+
+    if optimizer not in optimizer_classes:
+        raise ValueError(
+            f"Unknown optimizer: {optimizer}. Valid: {list(optimizer_classes)}"
+        )
 
     if optimizer in optimizer_classes:
         opt_class = optimizer_classes[optimizer]
@@ -142,6 +151,11 @@ def energy_cal(
         "BFGSLineSearch": BFGSLineSearch,
         "LBFGSLineSearch": LBFGSLineSearch,
     }
+
+    if optimizer not in optimizer_classes:
+        raise ValueError(
+            f"Unknown optimizer: {optimizer}. Valid: {list(optimizer_classes)}"
+        )
 
     if optimizer in optimizer_classes:
         opt_class = optimizer_classes[optimizer]

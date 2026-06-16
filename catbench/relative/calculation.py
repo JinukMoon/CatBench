@@ -141,8 +141,10 @@ class RelativeEnergyCalculation:
         # Handle both CatHub (star) and VASP (surface) naming
         surface_key = "star" if "star" in system_data else "surface"
 
-        surface_atoms = system_data[surface_key]["atoms"]
-        bulk_atoms = system_data["bulk"]["atoms"]
+        # .copy() so attaching .calc below does not mutate the cached self.data
+        # dict (the formation path already copies; mirror it here to avoid a leak).
+        surface_atoms = system_data[surface_key]["atoms"].copy()
+        bulk_atoms = system_data["bulk"]["atoms"].copy()
         n_factor = system_data["n_factor"]
         
         # Reference surface energy calculation

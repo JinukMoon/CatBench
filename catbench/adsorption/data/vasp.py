@@ -28,12 +28,13 @@ def read_E0_from_OSZICAR(file_path):
             last_line = lines[-1]
 
         energy = None
-        for word in last_line.split():
-            if word == "E0=":
-                energy_index = last_line.split().index(word) + 1
-                energy = last_line.split()[energy_index]
-                energy = float(energy)
-                break
+        # Robust to both "E0= -0.123" and the glued "E0=-0.123" that VASP can
+        # write when the value is wide. Split on the "E0=" marker rather than
+        # matching an exact whitespace-delimited token.
+        if "E0=" in last_line:
+            after = last_line.split("E0=")[1].split()
+            if after:
+                energy = float(after[0])
 
         if energy is None:
             raise ValueError(f"Energy value not found in file: {file_path}")
