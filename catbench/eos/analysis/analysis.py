@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FormatStrFormatter
 from scipy.optimize import curve_fit
 import pandas as pd
-import xlsxwriter
 from catbench.utils.analysis_utils import set_matplotlib_font
 from catbench.config import ANALYSIS_DEFAULTS, get_default
 

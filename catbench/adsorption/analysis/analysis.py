@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FormatStrFormatter
 import numpy as np
 import pandas as pd
-import xlsxwriter
 from ase.io import read
 
 from catbench.config import ANALYSIS_DEFAULTS, get_default, PLOT_COLORS, PLOT_MARKERS
