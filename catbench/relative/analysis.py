@@ -12,7 +12,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from catbench.utils.analysis_utils import set_matplotlib_font
-from catbench.config import RELATIVE_ANALYSIS_DEFAULTS, get_default
+from catbench.config import (
+    RELATIVE_ANALYSIS_DEFAULTS,
+    get_default,
+    EV_PER_ANG2_TO_J_PER_M2,
+)
 
 
 class RelativeEnergyAnalysis:
@@ -66,6 +70,11 @@ class RelativeEnergyAnalysis:
         self.min_value = kwargs.get("min", get_default("min", RELATIVE_ANALYSIS_DEFAULTS))
         self.max_value = kwargs.get("max", get_default("max", RELATIVE_ANALYSIS_DEFAULTS))
         self.grid = kwargs.get("grid", get_default("grid", RELATIVE_ANALYSIS_DEFAULTS))
+        # Font sizes (routed through config defaults instead of hardcoded literals)
+        self.xlabel_fontsize = kwargs.get("xlabel_fontsize", get_default("xlabel_fontsize", RELATIVE_ANALYSIS_DEFAULTS))
+        self.ylabel_fontsize = kwargs.get("ylabel_fontsize", get_default("ylabel_fontsize", RELATIVE_ANALYSIS_DEFAULTS))
+        self.mae_text_fontsize = kwargs.get("mae_text_fontsize", get_default("mae_text_fontsize", RELATIVE_ANALYSIS_DEFAULTS))
+        self.tick_labelsize = kwargs.get("tick_labelsize", get_default("tick_labelsize", RELATIVE_ANALYSIS_DEFAULTS))
         # Display name mapping for MLIP names (for plots/Excel display only)
         self.mlip_name_map = kwargs.get("mlip_name_map", get_default("mlip_name_map", RELATIVE_ANALYSIS_DEFAULTS)) or {}
         
@@ -83,7 +92,15 @@ class RelativeEnergyAnalysis:
     def _display_mlip_name(self, mlip_name):
         """Return mapped display name for MLIP if provided, else original name."""
         return self.mlip_name_map.get(mlip_name, mlip_name)
-    
+
+    def _count_label(self):
+        """Return the task-appropriate label for the per-MLIP system count column.
+
+        Surface tasks keep the historical "Num_surface" label; other task types
+        (bulk_formation, custom) use the generic "Num_systems".
+        """
+        return "Num_surface" if self.task_type == "surface" else "Num_systems"
+
     def _get_task_info(self):
         """Get task-specific information."""
         task_info = {
@@ -188,8 +205,8 @@ class RelativeEnergyAnalysis:
                     pred_value = system_result["mlip_calculation"][self.task_info["pred_key"]]
                     
                     if self.task_type == "surface":
-                        ref_value *= 16.022
-                        pred_value *= 16.022
+                        ref_value *= EV_PER_ANG2_TO_J_PER_M2
+                        pred_value *= EV_PER_ANG2_TO_J_PER_M2
                     
                     ref_values.append(ref_value)
                     pred_values.append(pred_value)
@@ -214,50 +231,54 @@ class RelativeEnergyAnalysis:
                 max_val = np.max(all_values) * 1.05
                 
             fig, ax = self._create_base_plot(min_val, max_val)
-            
-            scatter = ax.scatter(
-                ref_values,
-                pred_values,
-                color=self.specific_color,
-                marker="o",
-                s=self.mark_size,
-                edgecolors="black",
-                linewidths=self.linewidths,
-            )
-            
-            mae = np.mean(np.abs(ref_values - pred_values))
-            rmse = np.sqrt(np.mean((ref_values - pred_values)**2))
-            max_error = np.max(np.abs(ref_values - pred_values))
-            
-            display_name = self._display_mlip_name(mlip_name)
-            mae_label = f"MAE-{display_name}: {mae:.3f}"
-            
-            ax.text(
-                x=0.05, y=0.95,
-                s=mae_label,
-                transform=ax.transAxes,
-                fontsize=30,
-                verticalalignment="top",
-                bbox=dict(
-                    boxstyle="round", alpha=0.5, facecolor="white", 
-                    edgecolor="black", pad=0.5
-                ),
-            )
-            
-            ax.set_xlabel(f"DFT ({self.task_info['unit']})", fontsize=40)
-            ax.set_ylabel(f"{display_name} ({self.task_info['unit']})", fontsize=40)
-            ax.tick_params(axis="both", which="major", labelsize=20)
-            
-            plt.tight_layout()
-            
-            plot_filename = f"{display_name}_{self.task_type}_parity.png"
-            plt.savefig(os.path.join(plot_save_path, plot_filename), dpi=self.dpi)
-            plt.close()
-            
+
+            # Always close the figure (even on error) to avoid figure accumulation
+            # across many MLIPs.
+            try:
+                scatter = ax.scatter(
+                    ref_values,
+                    pred_values,
+                    color=self.specific_color,
+                    marker="o",
+                    s=self.mark_size,
+                    edgecolors="black",
+                    linewidths=self.linewidths,
+                )
+
+                mae = np.mean(np.abs(ref_values - pred_values))
+                rmse = np.sqrt(np.mean((ref_values - pred_values)**2))
+                max_error = np.max(np.abs(ref_values - pred_values))
+
+                display_name = self._display_mlip_name(mlip_name)
+                mae_label = f"MAE-{display_name}: {mae:.3f}"
+
+                ax.text(
+                    x=0.05, y=0.95,
+                    s=mae_label,
+                    transform=ax.transAxes,
+                    fontsize=self.mae_text_fontsize,
+                    verticalalignment="top",
+                    bbox=dict(
+                        boxstyle="round", alpha=0.5, facecolor="white",
+                        edgecolor="black", pad=0.5
+                    ),
+                )
+
+                ax.set_xlabel(f"DFT ({self.task_info['unit']})", fontsize=self.xlabel_fontsize)
+                ax.set_ylabel(f"{display_name} ({self.task_info['unit']})", fontsize=self.ylabel_fontsize)
+                ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
+
+                fig.tight_layout()
+
+                plot_filename = f"{display_name}_{self.task_type}_parity.png"
+                fig.savefig(os.path.join(plot_save_path, plot_filename), dpi=self.dpi)
+            finally:
+                plt.close(fig)
+
             print(f"    Parity plot saved: {plot_filename}")
-            
+
             all_metrics[mlip_name] = {
-                "MAE": mae, "RMSE": rmse, "Max_Error": max_error, "Num_surface": len(ref_values)
+                "MAE": mae, "RMSE": rmse, "Max_Error": max_error, self._count_label(): len(ref_values)
             }
         
         return all_metrics
@@ -296,8 +317,8 @@ class RelativeEnergyAnalysis:
                     pred_value = system_result["mlip_calculation"][self.task_info["pred_key"]]
                     
                     if self.task_type == "surface":
-                        ref_value *= 16.022
-                        pred_value *= 16.022
+                        ref_value *= EV_PER_ANG2_TO_J_PER_M2
+                        pred_value *= EV_PER_ANG2_TO_J_PER_M2
                     
                     difference = pred_value - ref_value
                     
@@ -324,14 +345,14 @@ class RelativeEnergyAnalysis:
             mae = np.mean(np.abs(ref_values - pred_values))
             rmse = np.sqrt(np.mean((ref_values - pred_values)**2))
             max_error = np.max(np.abs(ref_values - pred_values))
-            num_surface = len(ref_values)
-            
+            num_systems = len(ref_values)
+
             summary_data.append({
                 "MLIP_Name": self._display_mlip_name(mlip_name),
                 "MAE": mae,
                 "RMSE": rmse,
                 "Max_Error": max_error,
-                "Num_surface": num_surface
+                "Num_systems": num_systems
             })
             
             all_mlip_data[mlip_name] = system_data
@@ -374,8 +395,8 @@ class RelativeEnergyAnalysis:
             {"num_format": "#,##0", "align": "center", "valign": "vcenter"}
         )
         
-        headers = ["MLIP Name", f"MAE ({self.task_info['unit']})", f"RMSE ({self.task_info['unit']})", 
-                  f"Max Error ({self.task_info['unit']})", "Num_surface"]
+        headers = ["MLIP Name", f"MAE ({self.task_info['unit']})", f"RMSE ({self.task_info['unit']})",
+                  f"Max Error ({self.task_info['unit']})", self._count_label()]
         
         for col, header in enumerate(headers):
             worksheet.write(0, col, header, header_format)
@@ -385,7 +406,7 @@ class RelativeEnergyAnalysis:
             worksheet.write(row, 1, data["MAE"], number_format_3f)
             worksheet.write(row, 2, data["RMSE"], number_format_3f)
             worksheet.write(row, 3, data["Max_Error"], number_format_3f)
-            worksheet.write(row, 4, data["Num_surface"], number_format_0f)
+            worksheet.write(row, 4, data["Num_systems"], number_format_0f)
         
         column_widths = [25, 20, 20, 20, 15]
         for col, width in enumerate(column_widths):

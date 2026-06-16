@@ -231,67 +231,70 @@ class EOSAnalysis:
             
             # Create plot with config settings
             fig, ax = plt.subplots(figsize=self.figsize)
-            
-            # Apply font settings if configured
-            if self.font_setting:
-                set_matplotlib_font(*self.font_setting)
-            
-            # Plot data points with MLIP colors
-            ax.plot(volumes, vasp_rel, 'o', color='black', label='VASP', markersize=self.mark_size/10)
-            ax.plot(volumes, mlip_rel, 's', color=self.mlip_colors[mlip_name], label=display_name, markersize=self.mark_size/10)
-            
-            # Plot fitted curves
-            if vasp_fit_params is not None:
-                v_fit = np.linspace(np.min(volumes), np.max(volumes), 100)
-                vasp_fit = self._birch_murnaghan_eos(v_fit, *vasp_fit_params)
-                # Convert to relative energies for plotting
-                vasp_fit_rel = vasp_fit - np.min(vasp_fit)
-                ax.plot(v_fit, vasp_fit_rel, '-', color='black', alpha=0.5, linewidth=2)
-                
-                # Mark equilibrium volume from fit
-                v_eq_vasp = vasp_fit_params[1]  # V0 parameter
-                ax.axvline(v_eq_vasp, color='black', linestyle='--', alpha=0.3)
-            
-            if mlip_fit_params is not None:
-                v_fit = np.linspace(np.min(volumes), np.max(volumes), 100)
-                mlip_fit = self._birch_murnaghan_eos(v_fit, *mlip_fit_params)
-                # Convert to relative energies for plotting
-                mlip_fit_rel = mlip_fit - np.min(mlip_fit)
-                ax.plot(v_fit, mlip_fit_rel, '-', color=self.mlip_colors[mlip_name], alpha=0.5, linewidth=2)
-                
-                # Mark equilibrium volume from fit
-                v_eq_mlip = mlip_fit_params[1]  # V0 parameter
-                ax.axvline(v_eq_mlip, color=self.mlip_colors[mlip_name], linestyle='--', alpha=0.3)
-            
-            # Apply config-based styling
-            ax.set_xlabel('Volume (Å³)', fontsize=self.xlabel_fontsize, fontweight='bold')
-            ax.set_ylabel('Relative Energy (eV)', fontsize=self.ylabel_fontsize, fontweight='bold')
-            # Title removed as requested
-            
-            # Tick control from config
-            if self.x_tick_bins is not None:
-                ax.xaxis.set_major_locator(MaxNLocator(nbins=self.x_tick_bins))
-            if self.y_tick_bins is not None:
-                ax.yaxis.set_major_locator(MaxNLocator(nbins=self.y_tick_bins))
-            if self.tick_decimal_places is not None:
-                fmt = f"%.{self.tick_decimal_places}f"
-                ax.xaxis.set_major_formatter(FormatStrFormatter(fmt))
-                ax.yaxis.set_major_formatter(FormatStrFormatter(fmt))
-            
-            ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
-            ax.legend(fontsize=self.legend_fontsize, frameon=True, fancybox=True, shadow=False)
-            
-            # Grid from config
-            if self.grid:
-                ax.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            
-            # Save plot
-            plot_file = os.path.join(plot_dir, f"EOS_{material}.png")
-            plt.savefig(plot_file, dpi=self.dpi, bbox_inches='tight')
-            plt.close()
-            
+
+            # Always close the figure (even on error) to avoid figure accumulation.
+            try:
+                # Apply font settings if configured
+                if self.font_setting:
+                    set_matplotlib_font(*self.font_setting)
+
+                # Plot data points with MLIP colors
+                ax.plot(volumes, vasp_rel, 'o', color='black', label='VASP', markersize=self.mark_size/10)
+                ax.plot(volumes, mlip_rel, 's', color=self.mlip_colors[mlip_name], label=display_name, markersize=self.mark_size/10)
+
+                # Plot fitted curves
+                if vasp_fit_params is not None:
+                    v_fit = np.linspace(np.min(volumes), np.max(volumes), 100)
+                    vasp_fit = self._birch_murnaghan_eos(v_fit, *vasp_fit_params)
+                    # Convert to relative energies for plotting
+                    vasp_fit_rel = vasp_fit - np.min(vasp_fit)
+                    ax.plot(v_fit, vasp_fit_rel, '-', color='black', alpha=0.5, linewidth=2)
+
+                    # Mark equilibrium volume from fit
+                    v_eq_vasp = vasp_fit_params[1]  # V0 parameter
+                    ax.axvline(v_eq_vasp, color='black', linestyle='--', alpha=0.3)
+
+                if mlip_fit_params is not None:
+                    v_fit = np.linspace(np.min(volumes), np.max(volumes), 100)
+                    mlip_fit = self._birch_murnaghan_eos(v_fit, *mlip_fit_params)
+                    # Convert to relative energies for plotting
+                    mlip_fit_rel = mlip_fit - np.min(mlip_fit)
+                    ax.plot(v_fit, mlip_fit_rel, '-', color=self.mlip_colors[mlip_name], alpha=0.5, linewidth=2)
+
+                    # Mark equilibrium volume from fit
+                    v_eq_mlip = mlip_fit_params[1]  # V0 parameter
+                    ax.axvline(v_eq_mlip, color=self.mlip_colors[mlip_name], linestyle='--', alpha=0.3)
+
+                # Apply config-based styling
+                ax.set_xlabel('Volume (Å³)', fontsize=self.xlabel_fontsize, fontweight='bold')
+                ax.set_ylabel('Relative Energy (eV)', fontsize=self.ylabel_fontsize, fontweight='bold')
+                # Title removed as requested
+
+                # Tick control from config
+                if self.x_tick_bins is not None:
+                    ax.xaxis.set_major_locator(MaxNLocator(nbins=self.x_tick_bins))
+                if self.y_tick_bins is not None:
+                    ax.yaxis.set_major_locator(MaxNLocator(nbins=self.y_tick_bins))
+                if self.tick_decimal_places is not None:
+                    fmt = f"%.{self.tick_decimal_places}f"
+                    ax.xaxis.set_major_formatter(FormatStrFormatter(fmt))
+                    ax.yaxis.set_major_formatter(FormatStrFormatter(fmt))
+
+                ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
+                ax.legend(fontsize=self.legend_fontsize, frameon=True, fancybox=True, shadow=False)
+
+                # Grid from config
+                if self.grid:
+                    ax.grid(True, alpha=0.3)
+
+                fig.tight_layout()
+
+                # Save plot
+                plot_file = os.path.join(plot_dir, f"EOS_{material}.png")
+                fig.savefig(plot_file, dpi=self.dpi, bbox_inches='tight')
+            finally:
+                plt.close(fig)
+
             print(f"    Saved: {plot_file}")
     
     def _create_comparison_plots(self, all_results, materials):
@@ -306,93 +309,96 @@ class EOSAnalysis:
         # Create plot for each material
         for material in materials:
             fig, ax = plt.subplots(figsize=self.figsize)
-            
-            # Apply font settings if configured
-            if self.font_setting:
-                set_matplotlib_font(*self.font_setting)
-            
-            # First plot VASP reference
-            vasp_plotted = False
-            
-            for idx, mlip_name in enumerate(sorted(self.mlip_list, key=str.lower)):
-                if mlip_name not in all_results:
-                    continue
-                
-                mlip_results = all_results[mlip_name]
-                if material not in mlip_results["results"]:
-                    continue
-                
-                material_data = mlip_results["results"][material]
-                
-                # Extract data
-                volumes = []
-                vasp_energies = []
-                mlip_energies = []
-                
-                for point in material_data["points"]:
-                    if point["mlip_energy"] is not None:
-                        volumes.append(point["volume"])
-                        vasp_energies.append(point["vasp_energy"])
-                        mlip_energies.append(point["mlip_energy"])
-                
-                if len(volumes) < 2:
-                    continue
-                
-                # Convert to numpy arrays
-                volumes = np.array(volumes)
-                vasp_energies = np.array(vasp_energies)
-                mlip_energies = np.array(mlip_energies)
-                
-                # Calculate relative energies
-                vasp_rel = vasp_energies - np.min(vasp_energies)
-                mlip_rel = mlip_energies - np.min(mlip_energies)
-                
-                # Plot VASP only once
+
+            # Always close the figure (even on error / early skip) to avoid
+            # figure accumulation.
+            try:
+                # Apply font settings if configured
+                if self.font_setting:
+                    set_matplotlib_font(*self.font_setting)
+
+                # First plot VASP reference
+                vasp_plotted = False
+
+                for idx, mlip_name in enumerate(sorted(self.mlip_list, key=str.lower)):
+                    if mlip_name not in all_results:
+                        continue
+
+                    mlip_results = all_results[mlip_name]
+                    if material not in mlip_results["results"]:
+                        continue
+
+                    material_data = mlip_results["results"][material]
+
+                    # Extract data
+                    volumes = []
+                    vasp_energies = []
+                    mlip_energies = []
+
+                    for point in material_data["points"]:
+                        if point["mlip_energy"] is not None:
+                            volumes.append(point["volume"])
+                            vasp_energies.append(point["vasp_energy"])
+                            mlip_energies.append(point["mlip_energy"])
+
+                    if len(volumes) < 2:
+                        continue
+
+                    # Convert to numpy arrays
+                    volumes = np.array(volumes)
+                    vasp_energies = np.array(vasp_energies)
+                    mlip_energies = np.array(mlip_energies)
+
+                    # Calculate relative energies
+                    vasp_rel = vasp_energies - np.min(vasp_energies)
+                    mlip_rel = mlip_energies - np.min(mlip_energies)
+
+                    # Plot VASP only once
+                    if not vasp_plotted:
+                        ax.plot(volumes, vasp_rel, 'o-', color='black',
+                               label='VASP', markersize=self.mark_size/10, linewidth=3, alpha=0.9)
+                        vasp_plotted = True
+
+                    # Plot MLIP with consistent colors
+                    display_name = self._display_mlip_name(mlip_name)
+                    ax.plot(volumes, mlip_rel, 'o-', color=self.mlip_colors[mlip_name],
+                           label=display_name, markersize=self.mark_size/12, linewidth=2, alpha=0.7)
+
                 if not vasp_plotted:
-                    ax.plot(volumes, vasp_rel, 'o-', color='black', 
-                           label='VASP', markersize=self.mark_size/10, linewidth=3, alpha=0.9)
-                    vasp_plotted = True
-                
-                # Plot MLIP with consistent colors
-                display_name = self._display_mlip_name(mlip_name)
-                ax.plot(volumes, mlip_rel, 'o-', color=self.mlip_colors[mlip_name], 
-                       label=display_name, markersize=self.mark_size/12, linewidth=2, alpha=0.7)
-            
-            if not vasp_plotted:
-                print(f"    Skipping {material}: no valid data")
-                plt.close()
-                continue
-            
-            # Apply config-based styling
-            ax.set_xlabel('Volume (Å³)', fontsize=self.xlabel_fontsize, fontweight='bold')
-            ax.set_ylabel('Relative Energy (eV)', fontsize=self.ylabel_fontsize, fontweight='bold')
-            # Title removed as requested
-            
-            # Tick control from config
-            if self.x_tick_bins is not None:
-                ax.xaxis.set_major_locator(MaxNLocator(nbins=self.x_tick_bins))
-            if self.y_tick_bins is not None:
-                ax.yaxis.set_major_locator(MaxNLocator(nbins=self.y_tick_bins))
-            if self.tick_decimal_places is not None:
-                fmt = f"%.{self.tick_decimal_places}f"
-                ax.xaxis.set_major_formatter(FormatStrFormatter(fmt))
-                ax.yaxis.set_major_formatter(FormatStrFormatter(fmt))
-            
-            ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
-            ax.legend(fontsize=self.comparison_legend_fontsize, frameon=True, fancybox=True, shadow=False, ncol=2, loc='upper right')
-            
-            # Grid from config
-            if self.grid:
-                ax.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            
-            # Save plot directly in plot/
-            plot_file = os.path.join(self.plot_path, f"EOS_comparison_{material}.png")
-            plt.savefig(plot_file, dpi=self.dpi, bbox_inches='tight')
-            plt.close()
-            
-            print(f"    Saved: {plot_file}")
+                    print(f"    Skipping {material}: no valid data")
+                    continue
+
+                # Apply config-based styling
+                ax.set_xlabel('Volume (Å³)', fontsize=self.xlabel_fontsize, fontweight='bold')
+                ax.set_ylabel('Relative Energy (eV)', fontsize=self.ylabel_fontsize, fontweight='bold')
+                # Title removed as requested
+
+                # Tick control from config
+                if self.x_tick_bins is not None:
+                    ax.xaxis.set_major_locator(MaxNLocator(nbins=self.x_tick_bins))
+                if self.y_tick_bins is not None:
+                    ax.yaxis.set_major_locator(MaxNLocator(nbins=self.y_tick_bins))
+                if self.tick_decimal_places is not None:
+                    fmt = f"%.{self.tick_decimal_places}f"
+                    ax.xaxis.set_major_formatter(FormatStrFormatter(fmt))
+                    ax.yaxis.set_major_formatter(FormatStrFormatter(fmt))
+
+                ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
+                ax.legend(fontsize=self.comparison_legend_fontsize, frameon=True, fancybox=True, shadow=False, ncol=2, loc='upper right')
+
+                # Grid from config
+                if self.grid:
+                    ax.grid(True, alpha=0.3)
+
+                fig.tight_layout()
+
+                # Save plot directly in plot/
+                plot_file = os.path.join(self.plot_path, f"EOS_comparison_{material}.png")
+                fig.savefig(plot_file, dpi=self.dpi, bbox_inches='tight')
+
+                print(f"    Saved: {plot_file}")
+            finally:
+                plt.close(fig)
     
     def _create_excel_report(self, all_results, materials):
         """Create comprehensive Excel report with multiple sheets."""

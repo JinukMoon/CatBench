@@ -108,6 +108,11 @@ PLOT_MARKERS = [
 # RELATIVE ENERGY ANALYSIS DEFAULTS (from analysis/relative_analysis.py)
 # ============================================================================
 
+# Surface energy unit conversion: eV/Å^2 -> J/m^2.
+# Kept at the historical literal value (16.022) so surface-energy numbers are
+# unchanged; named here to remove the bare magic number from the analysis code.
+EV_PER_ANG2_TO_J_PER_M2 = 16.022
+
 RELATIVE_ANALYSIS_DEFAULTS = {
     # Path settings
     "calculating_path": lambda: os.path.join(os.getcwd(), "result"),
@@ -115,7 +120,7 @@ RELATIVE_ANALYSIS_DEFAULTS = {
     "benchmark": lambda: os.path.basename(os.getcwd()),
     "task_type": None,
     "mlip_list": None,
-    
+
     # Plot settings (same as catbench_analysis.py)
     "figsize": (9, 8),
     "mark_size": 100,
@@ -126,6 +131,12 @@ RELATIVE_ANALYSIS_DEFAULTS = {
     "min": None,
     "max": None,
     "grid": False,
+
+    # Font sizes (preserve historical hardcoded values)
+    "xlabel_fontsize": 40,
+    "ylabel_fontsize": 40,
+    "mae_text_fontsize": 30,
+    "tick_labelsize": 20,
 }
 
 # ============================================================================

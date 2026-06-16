@@ -157,8 +157,6 @@ class AdsorptionAnalysis:
         self.mlip_name_map = kwargs.get("mlip_name_map", get_default("mlip_name_map", ANALYSIS_DEFAULTS)) or {}
         # Plot toggle
         self.plot_enabled = kwargs.get("plot_enabled", get_default("plot_enabled", ANALYSIS_DEFAULTS))
-        # Plot generation configuration
-        self.plot_enabled = kwargs.get("plot_enabled", get_default("plot_enabled", ANALYSIS_DEFAULTS))
 
         # Color and marker settings for multi plots
         self.colors = PLOT_COLORS
@@ -240,40 +238,42 @@ class AdsorptionAnalysis:
         """Create monochrome plot with optional pre-computed data."""
         fig, ax = self._create_base_plot(min_value, max_value)
 
-        # Use pre-computed data if provided, otherwise compute
-        if plot_data is not None:
-            pass
-        else:
-            # Use dictionary lookup for efficient data access
-            type_mapping = {
-                "total": ["normal", "adsorbate_migration", "energy_anomaly", "unphysical_relaxation", "reproduction_failure"],
-                "normal": ["normal"],
-                "migration": ["adsorbate_migration"],
-                "anomaly": ["energy_anomaly", "unphysical_relaxation", "reproduction_failure"],
-                "single": ["all"]
-            }
-            types = type_mapping.get(tag, ["all"])
-            plot_data = prepare_plot_data(ads_data, types)
+        # Always close the figure (even on error) to avoid figure accumulation
+        # across many MLIPs with the Agg backend.
+        try:
+            # Use pre-computed data if provided, otherwise compute
+            if plot_data is not None:
+                pass
+            else:
+                # Use dictionary lookup for efficient data access
+                type_mapping = {
+                    "total": ["normal", "adsorbate_migration", "energy_anomaly", "unphysical_relaxation", "reproduction_failure"],
+                    "normal": ["normal"],
+                    "migration": ["adsorbate_migration"],
+                    "anomaly": ["energy_anomaly", "unphysical_relaxation", "reproduction_failure"],
+                    "single": ["all"]
+                }
+                types = type_mapping.get(tag, ["all"])
+                plot_data = prepare_plot_data(ads_data, types)
 
-        # Check if we have data to plot
-        dft_data = plot_data["DFT"]
-        mlip_data = plot_data["MLIP"]
-        n_points = len(dft_data)
+            # Check if we have data to plot
+            dft_data = plot_data["DFT"]
+            mlip_data = plot_data["MLIP"]
+            n_points = len(dft_data)
 
-        if n_points == 0:
-            # No data to plot. Record nan (NOT 0.0, which would be
-            # indistinguishable from a perfect score) and skip the misleading
-            # parity plot entirely; stamp the figure "NO DATA" before closing.
-            ax.text(
-                x=0.5, y=0.5,
-                s="NO DATA",
-                transform=ax.transAxes,
-                fontsize=self.mae_text_fontsize,
-                ha="center", va="center", color="gray",
-            )
-            plt.close()
-            return np.nan
-        else:
+            if n_points == 0:
+                # No data to plot. Record nan (NOT 0.0, which would be
+                # indistinguishable from a perfect score) and skip the misleading
+                # parity plot entirely; stamp the figure "NO DATA" before closing.
+                ax.text(
+                    x=0.5, y=0.5,
+                    s="NO DATA",
+                    transform=ax.transAxes,
+                    fontsize=self.mae_text_fontsize,
+                    ha="center", va="center", color="gray",
+                )
+                return np.nan
+
             # Single mono plot uses single color and marker
             scatter = ax.scatter(
                 dft_data,
@@ -304,41 +304,54 @@ class AdsorptionAnalysis:
             # Efficient MAE calculation
             MAE = np.mean(np.abs(dft_data - mlip_data))
 
-        display_name = self._display_mlip_name(mlip_name)
-        mae_label = f"MAE-{display_name}: {MAE:.2f}"
+            display_name = self._display_mlip_name(mlip_name)
+            mae_label = f"MAE-{display_name}: {MAE:.2f}"
 
-        if not self.mae_text_off:
-            ax.text(
-                x=0.05, y=0.95,
-                s=mae_label,
-                transform=ax.transAxes,
-                fontsize=self.mae_text_fontsize,
-                verticalalignment="top",
-                bbox=dict(
-                    boxstyle="round", alpha=0.5, facecolor="white", 
-                    edgecolor="black", pad=0.5
-                ),
-                zorder=100002,
-            )
+            if not self.mae_text_off:
+                ax.text(
+                    x=0.05, y=0.95,
+                    s=mae_label,
+                    transform=ax.transAxes,
+                    fontsize=self.mae_text_fontsize,
+                    verticalalignment="top",
+                    bbox=dict(
+                        boxstyle="round", alpha=0.5, facecolor="white",
+                        edgecolor="black", pad=0.5
+                    ),
+                    zorder=100002,
+                )
 
-        if not self.xlabel_off:
-            ax.set_xlabel("DFT (eV)", fontsize=self.xlabel_fontsize)
-        if not self.ylabel_off:
-            ax.set_ylabel(f"{display_name} (eV)", fontsize=self.ylabel_fontsize)
-        ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
+            if not self.xlabel_off:
+                ax.set_xlabel("DFT (eV)", fontsize=self.xlabel_fontsize)
+            if not self.ylabel_off:
+                ax.set_ylabel(f"{display_name} (eV)", fontsize=self.ylabel_fontsize)
+            ax.tick_params(axis="both", which="major", labelsize=self.tick_labelsize)
 
-        plt.savefig(f"{mono_path}/{tag}.png", dpi=self.dpi, bbox_inches='tight')
-        plt.close()
+            fig.savefig(f"{mono_path}/{tag}.png", dpi=self.dpi, bbox_inches='tight')
 
-        return MAE
+            return MAE
+        finally:
+            plt.close(fig)
 
     def multi_plotter(self, ads_data, mlip_name, types, tag, min_value, max_value, multi_path):
         """Create multi-color plot with adsorbate-specific colors."""
         fig, ax = self._create_base_plot(min_value, max_value)
 
-        # Sort adsorbates by total data count (descending) for consistent order
-        analysis_adsorbates = sorted([ads for ads in ads_data.keys() if ads != "all"], 
-                                   key=lambda ads: self._get_adsorbate_count(ads, ads_data), reverse=True)
+        # Always close the figure (even on error) to avoid figure accumulation
+        # across many MLIPs with the Agg backend.
+        try:
+            return self._multi_plotter_body(
+                ads_data, mlip_name, types, tag, multi_path, fig, ax
+            )
+        finally:
+            plt.close(fig)
+
+    def _multi_plotter_body(self, ads_data, mlip_name, types, tag, multi_path, fig, ax):
+        """Render the multi-color parity plot body (figure closed by caller)."""
+        # Sort adsorbates by total data count (descending), with an alphabetical
+        # tiebreak so the color/marker assignment is fully deterministic on ties.
+        analysis_adsorbates = sorted([ads for ads in ads_data.keys() if ads != "all"],
+                                   key=lambda ads: (-self._get_adsorbate_count(ads, ads_data), ads))
         len_adsorbates = len(analysis_adsorbates)
         legend_width = len(max(analysis_adsorbates, key=len)) if analysis_adsorbates else 0
 
@@ -449,24 +462,24 @@ class AdsorptionAnalysis:
         else:
             if scatter_handles:
                 fig_legend = plt.figure()
-                fig_legend.legend(
-                    handles=scatter_handles,
-                    loc="center",
-                    frameon=False,
-                    ncol=(len_adsorbates // 7) + 1,
-                    fontsize=self.legend_fontsize,
-                    markerscale=self.legend_markerscale,
-                )
-                fig_legend.savefig(f"{multi_path}/legend.png", dpi=self.dpi, bbox_inches="tight")
-                plt.close(fig_legend)
+                try:
+                    fig_legend.legend(
+                        handles=scatter_handles,
+                        loc="center",
+                        frameon=False,
+                        ncol=(len_adsorbates // 7) + 1,
+                        fontsize=self.legend_fontsize,
+                        markerscale=self.legend_markerscale,
+                    )
+                    fig_legend.savefig(f"{multi_path}/legend.png", dpi=self.dpi, bbox_inches="tight")
+                finally:
+                    plt.close(fig_legend)
 
         # Skip saving a misleading "clean" parity plot when there is no data at all.
         if len_total == 0:
-            plt.close()
             return MAEs
 
-        plt.savefig(f"{multi_path}/{tag}.png", dpi=self.dpi, bbox_inches='tight')
-        plt.close()
+        fig.savefig(f"{multi_path}/{tag}.png", dpi=self.dpi, bbox_inches='tight')
 
         return MAEs
 
@@ -481,9 +494,6 @@ class AdsorptionAnalysis:
             if anomaly_data:
                 # Create custom anomaly sheet with merged cells like main sheet
                 self._create_anomaly_sheet(writer, anomaly_data)
-                df_anomaly = pd.DataFrame(anomaly_data)  # Required for DataFrame formatting
-            else:
-                df_anomaly = pd.DataFrame()
 
             for mlip_name in sorted(MLIPs_data.keys(), key=str.lower):
                 data_dict = MLIPs_data[mlip_name]
@@ -532,110 +542,11 @@ class AdsorptionAnalysis:
                         })
 
                 if data_tmp:
-                    # Create custom MLIP sheet with merged cells like main sheet
+                    # Create custom MLIP sheet with merged cells like main sheet.
+                    # All sheets (MLIP_Data, anomaly, per-MLIP) are written with their
+                    # own formatting by the dedicated _create_*_sheet helpers, so no
+                    # post-loop generic formatting pass is required.
                     self._create_mlip_sheet(writer, data_tmp, mlip_name)
-                    data_df = pd.DataFrame(data_tmp)  # Required for DataFrame formatting
-                else:
-                    data_tmp = []
-
-            # Apply formatting (same as core.py)
-            workbook = writer.book
-            header_format = workbook.add_format({
-                "align": "center", 
-                "valign": "vcenter",
-                "bold": True
-            })
-            center_align = workbook.add_format({"align": "center", "valign": "vcenter"})
-            number_format_0f = workbook.add_format(
-                {"num_format": "#,##0", "align": "center", "valign": "vcenter"}
-            )
-            number_format_3f = workbook.add_format(
-                {"num_format": "0.000", "align": "center", "valign": "vcenter"}
-            )
-            number_format_6f = workbook.add_format(
-                {"num_format": "0.000000", "align": "center", "valign": "vcenter"}
-            )
-
-            column_formats = {
-                # Rate columns
-                "Anomaly_rate": (18, number_format_3f),
-                "Reproduction_failure_rate": (25, number_format_3f),
-                "Unphysical_relaxation_rate": (25, number_format_3f),
-                "Adsorbate_migration_rate": (25, number_format_3f),  # Extended
-                "Energy_anomaly_rate": (18, number_format_3f),  # Reduced
-                # MAE columns
-                "MAE_total": (15, number_format_3f),
-                "MAE_normal": (17, number_format_3f),
-                "MAE_single": (15, number_format_3f),
-                # Metrics columns
-                "ADwT": (12, number_format_3f),
-                "AMDwT": (12, number_format_3f),
-                # Count columns
-                "Num_total": (12, number_format_0f),
-                "Num_normal": (13, number_format_0f),
-                "Num_reproduction_failure": (24, number_format_0f),
-                "Num_unphysical_relaxation": (25, number_format_0f),
-                "Num_adsorbate_migration": (22, number_format_0f),
-                "Num_energy_anomaly": (18, number_format_0f),
-                "Num_anomaly_total": (18, number_format_0f),
-                # Column formatting for anomaly sheet
-                "Anomaly rate (%)": (20, number_format_3f),
-                "MAE_total (eV)": (15, number_format_3f),
-                "MAE_normal (eV)": (17, number_format_3f),
-                "MAE_single (eV)": (15, number_format_3f),
-                "Num_anomaly": (15, number_format_0f),
-                "slab_conv": (12, number_format_0f),
-                "ads_conv": (12, number_format_0f),
-                "slab_move": (12, number_format_0f),
-                "ads_move": (12, number_format_0f),
-                "slab_seed": (12, number_format_0f),
-                "ads_seed": (12, number_format_0f),
-                "ads_eng_seed": (12, number_format_0f),
-                "Time_total (s)": (15, number_format_0f),
-                "Steps_total": (15, number_format_0f),
-                "Time_per_step (s)": (17, number_format_3f),
-            }
-
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
-
-                # Skip custom formatted sheets as they're already formatted
-                mlip_names = self.mlip_list if self.mlip_list else []
-                if sheet_name in ["MLIP_Data", "anomaly"] or sheet_name in mlip_names:
-                    continue
-
-                df = (
-                    df_anomaly
-                    if sheet_name == "anomaly" and anomaly_data
-                    else pd.DataFrame(data_tmp) if 'data_tmp' in locals() and data_tmp else pd.DataFrame()
-                )
-
-                # Skip empty dataframes
-                if df.empty:
-                    continue
-
-                for col_num, col_name in enumerate(df.columns):
-                    worksheet.write(0, col_num, col_name, header_format)
-
-                for col_num, col_name in enumerate(df.columns):
-                    if col_name in column_formats:
-                        width, fmt = column_formats[col_name]
-                    else:
-                        width = (
-                            max(df[col_name].astype(str).map(len).max(), len(col_name)) + 10
-                        )
-                        fmt = center_align
-
-                    worksheet.set_column(col_num, col_num, width, fmt)
-
-                    if df[col_name].dtype == "object":
-                        worksheet.set_column(col_num, col_num, width, center_align)
-                    else:
-                        worksheet.set_column(col_num, col_num, width, fmt)
-
-                row_height = 20
-                for row in range(len(df) + 1):
-                    worksheet.set_row(row, row_height)
 
         print(f"Excel file '{output_file}' created successfully.")
 
@@ -1249,9 +1160,33 @@ class AdsorptionAnalysis:
             from catbench.utils.analysis_utils import set_matplotlib_font
             set_matplotlib_font(self.font_setting[0], self.font_setting[1])
 
-        # Create figure
-        fig, ax = plt.subplots(figsize=(12, 8))
+        # Create figure (use the configured figure size rather than a hardcoded one)
+        fig, ax = plt.subplots(figsize=self.figsize)
 
+        # Always close the figure (even on error) to avoid figure accumulation.
+        try:
+            self._fill_threshold_plot(fig, ax, results_data, threshold_label)
+
+            # Save plot
+            if mode == "disp_thrs":
+                filename = f"{display_name}_disp_thrs_sensitivity.png"
+            else:
+                filename = f"{display_name}_bond_threshold_sensitivity.png"
+
+            fig.savefig(
+                os.path.join(plot_path, filename),
+                dpi=self.dpi,
+                bbox_inches='tight',
+                facecolor='white',
+                edgecolor='none'
+            )
+        finally:
+            plt.close(fig)
+
+        print(f"  Saved: {filename}")
+
+    def _fill_threshold_plot(self, fig, ax, results_data, threshold_label):
+        """Render the threshold-sensitivity stacked area plot (figure closed by caller)."""
         # Define colors for each category (professional color scheme)
         colors = {
             "reproduction_failure": "#2D234C",   # Dark purple (most severe)
@@ -1337,23 +1272,6 @@ class AdsorptionAnalysis:
         # Set spine properties
         for spine in ax.spines.values():
             spine.set_linewidth(1.5)
-
-        # Save plot
-        if mode == "disp_thrs":
-            filename = f"{display_name}_disp_thrs_sensitivity.png"
-        else:
-            filename = f"{display_name}_bond_threshold_sensitivity.png"
-
-        plt.savefig(
-            os.path.join(plot_path, filename), 
-            dpi=self.dpi, 
-            bbox_inches='tight',
-            facecolor='white',
-            edgecolor='none'
-        )
-        plt.close()
-
-        print(f"  Saved: {filename}")
 
     def _run_analysis(self):
         """Execute comprehensive analysis with anomaly detection and report generation."""
@@ -1561,8 +1479,9 @@ class AdsorptionAnalysis:
                 else:
                     min_value, max_value = self.min_value, self.max_value
 
-                # Re-sort adsorbates by data count for consistent ordering across all plots
-                analysis_adsorbates = sorted(analysis_adsorbates, key=lambda ads: self._get_adsorbate_count(ads, ads_data), reverse=True)
+                # Re-sort adsorbates by data count for consistent ordering across all
+                # plots, with an alphabetical tiebreak for deterministic ordering on ties.
+                analysis_adsorbates = sorted(analysis_adsorbates, key=lambda ads: (-self._get_adsorbate_count(ads, ads_data), ads))
 
                 # Create single calculation plots data with re-sorted adsorbates
                 single_data = self._create_single_data_structure(mlip_result, analysis_adsorbates)
@@ -2402,8 +2321,6 @@ class AdsorptionAnalysis:
                 "classification": classification,
                 "details": anomalies
             }
-
-        total_reactions = len(anomaly_summary)
 
         return anomaly_detection_result, anomaly_summary
 
