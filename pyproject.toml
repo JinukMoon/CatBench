@@ -16,6 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
@@ -43,12 +44,7 @@ include = ["catbench*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-"catbench.dispersion" = [
-    "cuda/*.py",
-    "cuda/*.so",
-    "cuda/pair_e3gnn/*.cu",
-    "cuda/pair_e3gnn/*.h",
-]
+"catbench.dispersion" = ["cuda/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

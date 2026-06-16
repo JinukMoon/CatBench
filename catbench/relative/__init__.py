@@ -22,15 +22,23 @@ Example usage:
 
 # Core classes (work with all relative energy types)
 from catbench.relative.calculation import RelativeEnergyCalculation
-from catbench.relative.analysis import RelativeEnergyAnalysis
 
 # Import task-specific classes for convenience
 from catbench.relative.surface_energy.calculation.calculation import SurfaceEnergyCalculation
 from catbench.relative.bulk_formation.calculation.calculation import BulkFormationCalculation
+from catbench.relative.custom.calculation.calculation import CustomCalculation
 
 __all__ = [
     'RelativeEnergyCalculation',
     'RelativeEnergyAnalysis',
     'SurfaceEnergyCalculation',
     'BulkFormationCalculation',
+    'CustomCalculation',
 ]
+
+
+def __getattr__(name):
+    if name == 'RelativeEnergyAnalysis':
+        from catbench.relative.analysis import RelativeEnergyAnalysis
+        return RelativeEnergyAnalysis
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
