@@ -9,7 +9,10 @@ from ase import Atoms
 from ase.constraints import FixAtoms
 from ase.io import write
 
-from catbench.adsorption.data.cathub import aseify_reactions
+from catbench.adsorption.data.cathub import (
+    aseify_reactions,
+    _fixed_indices_from_relaxation,
+)
 from catbench.utils.calculation_utils import get_fixed_indices
 from catbench.utils.data_utils import load_catbench_json, save_catbench_json
 from catbench.utils.io_utils import get_calculation_settings
@@ -105,6 +108,60 @@ def test_aseify_reactions_none_constraints_yields_no_fixatoms():
 
     gas = reactions[0]["reactionSystems"]["gas"]["atoms"]
     assert [c for c in gas.constraints if isinstance(c, FixAtoms)] == []
+
+
+# --------------------------------------------------------------------------- #
+# Geometry-based fixed-atom inference (reconstruct FixAtoms when CatHub omits it)
+# --------------------------------------------------------------------------- #
+def _slab_and_adslab(frozen_bottom, n=6, shift=0.2):
+    """Build a clean slab and an adslab where the bottom `frozen_bottom` atoms
+    are byte-identical (fixed) and the rest are displaced (relaxed), plus one
+    adsorbate atom appended at the end."""
+    from ase import Atoms
+
+    pos = [[0.0, 0.0, float(z)] for z in range(n)]
+    slab = Atoms(f"Cu{n}", positions=pos, cell=[20.0, 20.0, 20.0], pbc=True)
+    ad_pos = []
+    for i, p in enumerate(pos):
+        if i < frozen_bottom:
+            ad_pos.append(list(p))                       # frozen: identical
+        else:
+            ad_pos.append([p[0] + shift, p[1], p[2]])    # relaxed: moved
+    ad_pos.append([0.0, 0.0, float(n + 1)])              # adsorbate H
+    adslab = Atoms(f"Cu{n}H", positions=ad_pos, cell=[20.0, 20.0, 20.0], pbc=True)
+    return slab, adslab, [n]  # adsorbate index = last
+
+
+def test_infer_fixed_recovers_frozen_bottom_indices():
+    slab, adslab, ads_idx = _slab_and_adslab(frozen_bottom=3, n=6)
+    slab_fx, adslab_fx = _fixed_indices_from_relaxation(slab, adslab, ads_idx)
+    assert adslab_fx == [0, 1, 2]
+    assert slab_fx == [0, 1, 2]
+
+
+def test_infer_fixed_all_free_returns_empty():
+    slab, adslab, ads_idx = _slab_and_adslab(frozen_bottom=0, n=6)
+    slab_fx, adslab_fx = _fixed_indices_from_relaxation(slab, adslab, ads_idx)
+    assert adslab_fx == []          # genuinely unconstrained -> no fixed atoms
+    assert slab_fx == []
+
+
+def test_infer_fixed_fully_fixed_returns_all():
+    slab, adslab, ads_idx = _slab_and_adslab(frozen_bottom=6, n=6)
+    slab_fx, adslab_fx = _fixed_indices_from_relaxation(slab, adslab, ads_idx)
+    assert adslab_fx == [0, 1, 2, 3, 4, 5]
+
+
+def test_infer_fixed_atom_count_mismatch_returns_none():
+    from ase import Atoms
+
+    slab = Atoms("Cu6", positions=[[0, 0, z] for z in range(6)],
+                 cell=[20, 20, 20], pbc=True)
+    # adslab substrate has only 5 Cu -> cannot map 1:1 to a 6-atom clean slab
+    adslab = Atoms("Cu5H", positions=[[0, 0, z] for z in range(6)],
+                   cell=[20, 20, 20], pbc=True)
+    slab_fx, adslab_fx = _fixed_indices_from_relaxation(slab, adslab, [5])
+    assert slab_fx is None and adslab_fx is None
 
 
 # --------------------------------------------------------------------------- #

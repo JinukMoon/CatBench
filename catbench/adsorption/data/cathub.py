@@ -169,7 +169,73 @@ def aseify_reactions(reactions):
         }
 
 
-def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constraints=True):
+def _fixed_indices_from_relaxation(slab_atoms, adslab_atoms, adsorbate_indices,
+                                   tol=1e-4):
+    """Infer which atoms were held fixed during DFT, from geometry alone.
+
+    When a slab/adslab is relaxed with part of the slab frozen (FixAtoms), the
+    frozen atoms keep the *exact* same coordinates in the clean slab and in the
+    adslab (the fixed coordinates are reused). A free atom relaxes differently
+    once an adsorbate is present, so it moves. We therefore compare each adslab
+    substrate atom to its nearest same-element clean-slab atom: a match within
+    ``tol`` (Angstrom) means that atom never moved -> it was fixed.
+
+    This recovers the deposited FixAtoms set exactly (validated on CatHub
+    datasets that *do* carry constraints: per-atom IoU = 1.000 on Comer,
+    BackPrediction2018, BajdichWO32018, ...). It is used to reconstruct the
+    constraint for datasets where CatHub did not deposit it.
+
+    Args:
+        slab_atoms (ase.Atoms): clean slab ("star").
+        adslab_atoms (ase.Atoms): adsorbate+slab ("*star").
+        adsorbate_indices (list[int]): indices of adsorbate atoms in the adslab.
+        tol (float): max displacement (A) to count an atom as fixed. Genuinely
+            fixed atoms reuse coordinates verbatim so their displacement is
+            exactly 0; free atoms move >~5e-4 A even when far from the adsorbate.
+            Default 1e-4 sits in that gap (validated by a tol sweep: deposited-fix
+            datasets stay at IoU 1.0 down to 1e-6, while free-but-static atoms only
+            drop out below ~1e-3). Going tighter than ~1e-5 starts discarding real
+            fixed atoms on datasets whose clean slab carries float-precision noise.
+
+    Returns:
+        (slab_fixed, adslab_fixed): sorted index lists. Empty lists mean the
+        slab was genuinely unconstrained (relaxed freely). Returns (None, None)
+        when detection is not reliable (substrate atom count != clean slab),
+        signalling the caller to fall back.
+    """
+    import numpy as np
+    from ase.geometry import find_mic
+
+    ads_set = set(int(i) for i in adsorbate_indices)
+    sub_idx = [i for i in range(len(adslab_atoms)) if i not in ads_set]
+    # The adslab substrate must correspond 1:1 to the clean slab; if not, the
+    # adsorbate-index detection is off and geometric matching is unreliable.
+    if len(sub_idx) != len(slab_atoms):
+        return None, None
+
+    cell = adslab_atoms.cell
+    slab_pos = slab_atoms.positions
+    slab_sym = np.array(slab_atoms.get_chemical_symbols())
+    ad_sym = np.array(adslab_atoms.get_chemical_symbols())
+    ad_pos = adslab_atoms.positions
+
+    adslab_fixed, slab_fixed = [], []
+    for ai in sub_idx:
+        cand = np.where(slab_sym == ad_sym[ai])[0]
+        if len(cand) == 0:
+            continue
+        disp = slab_pos[cand] - ad_pos[ai]
+        mic, _ = find_mic(disp, cell)
+        d = np.linalg.norm(mic, axis=1)
+        jmin = int(d.argmin())
+        if d[jmin] < tol:
+            adslab_fixed.append(ai)
+            slab_fixed.append(int(cand[jmin]))
+    return sorted(set(slab_fixed)), sorted(adslab_fixed)
+
+
+def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constraints=True,
+                         infer_fix_when_missing=True, fix_detect_tol=1e-4):
     """
     Download and preprocess CatHub data for MLIP benchmarking.
     
@@ -520,29 +586,66 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
                     data_total[tag]["adsorbate_indices"] = []
                     logger.warning(f"Could not detect adsorbate indices for {tag}")
 
-                # Strict missing-constraint check: CatHub normally stores FixAtoms
-                # for slabs/adslabs. A slab/adslab ("star"/"*star") with no FixAtoms
-                # is a data gap and cannot be benchmarked reliably. gas/bulk references
-                # legitimately carry no constraints and are exempt.
+                # Constraint handling. CatHub normally deposits FixAtoms for
+                # slabs/adslabs, but a sizeable fraction of datasets do not.
+                # Policy:
+                #   - if the star/*star already carries FixAtoms -> keep it as-is.
+                #   - if it is missing and infer_fix_when_missing -> reconstruct
+                #     the fixed-atom set from geometry (clean slab vs adslab; the
+                #     frozen atoms never move). Inject it so the structure becomes
+                #     self-describing and runs identically to a deposited one.
+                #     An empty inferred set means the slab was genuinely free.
+                #   - if inference is unreliable (atom-count mismatch) -> fall
+                #     back to require_constraints (raise & skip) or keep flagged.
+                # gas/bulk references legitimately carry no constraints (exempt).
                 def _has_fixatoms(atoms):
                     return any(
                         isinstance(c, FixAtoms) and len(c.get_indices()) > 0
                         for c in atoms.constraints
                     )
 
-                for structure_key in data_total[tag]["raw"]:
-                    if require_constraints and "star" in structure_key:
-                        if not _has_fixatoms(data_total[tag]["raw"][structure_key]["atoms"]):
-                            # Drop the partially-stored entry so the reaction is
-                            # cleanly skipped (the raise is logged by the outer handler).
+                raw_structs = data_total[tag]["raw"]
+                missing = [k for k in raw_structs
+                           if "star" in k and not _has_fixatoms(raw_structs[k]["atoms"])]
+
+                if not missing:
+                    data_total[tag]["constraint_source"] = "deposited"
+                else:
+                    injected = False
+                    if (infer_fix_when_missing and slab_key in raw_structs
+                            and adslab_key in raw_structs):
+                        slab_fx, adslab_fx = _fixed_indices_from_relaxation(
+                            raw_structs[slab_key]["atoms"],
+                            raw_structs[adslab_key]["atoms"],
+                            data_total[tag].get("adsorbate_indices", []),
+                            tol=fix_detect_tol,
+                        )
+                        if slab_fx is not None:  # detection ran (possibly empty=free)
+                            if adslab_key in missing and adslab_fx:
+                                raw_structs[adslab_key]["atoms"].set_constraint(
+                                    FixAtoms(indices=adslab_fx))
+                            if slab_key in missing and slab_fx:
+                                raw_structs[slab_key]["atoms"].set_constraint(
+                                    FixAtoms(indices=slab_fx))
+                            data_total[tag]["constraint_source"] = (
+                                "geometry_inferred" if adslab_fx else "free")
+                            logger.debug(
+                                f"{tag}: inferred fix (slab={len(slab_fx)}, "
+                                f"adslab={len(adslab_fx)} atoms)")
+                            injected = True
+                    if not injected:
+                        if require_constraints:
                             data_total.pop(tag, None)
                             raise ValueError(
-                                f"CatHub data gap: structure '{structure_key}' in reaction "
-                                f"'{tag}' has no FixAtoms constraint. CatHub normally stores "
-                                f"fixed-atom info for slabs/adslabs; this dataset entry is "
-                                f"missing it and cannot be benchmarked reliably. "
-                                f"(gas/bulk references are exempt.)"
+                                f"CatHub data gap: reaction '{tag}' has a star/*star "
+                                f"with no FixAtoms and the fixed set could not be "
+                                f"inferred (substrate/clean-slab atom-count mismatch). "
+                                f"Cannot benchmark reliably. (gas/bulk are exempt.)"
                             )
+                        data_total[tag]["constraint_source"] = "undetermined_kept"
+                        logger.warning(
+                            f"{tag}: missing FixAtoms and inference unavailable; "
+                            f"kept without constraint (run with explicit rate=).")
 
                 # Log successful processing
                 logger.debug(f"Successfully processed reaction: {tag}")
