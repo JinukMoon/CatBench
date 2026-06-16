@@ -28,7 +28,14 @@ venv/
 *.tmp
 *.temp
 
-# Claude Code
+# Claude Code / AI agent tooling
 CLAUDE.md
 .claude/
 .claude*
+AGENTS.md
+.cursor/
+.cursorrules
+.github/copilot-instructions.md
+
+# oh-my-claudecode (OMC)
+.omc/
