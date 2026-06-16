@@ -7,6 +7,7 @@ single point energy calculations for relative energy benchmarking tasks.
 
 import os
 import json
+import traceback
 import numpy as np
 from ase.io import write
 from catbench.utils.io_utils import get_result_directory, get_raw_data_path, save_json
@@ -101,9 +102,10 @@ class RelativeEnergyCalculation:
         
         # Process each system
         results = {}
+        failed = {}
         for i, (system_name, system_data) in enumerate(self.data.items()):
             print(f"[{i+1}/{len(self.data)}] Processing {system_name}")
-            
+
             try:
                 if self.task_type == "surface":
                     result = self._calculate_surface_energy(system_name, system_data, save_directory)
@@ -111,16 +113,20 @@ class RelativeEnergyCalculation:
                     result = self._calculate_bulk_formation_energy(system_name, system_data, save_directory)
                 else:  # custom
                     result = self._calculate_custom_energy(system_name, system_data, save_directory)
-                    
+
                 results[system_name] = result
-                
+
             except Exception as e:
                 print(f"Error calculating {system_name}: {str(e)}")
+                failed[system_name] = {"error": repr(e), "traceback": traceback.format_exc()[-2000:]}
                 continue
-        
+
         # Save results
-        self._save_results(save_directory, results)
-        
+        self._save_results(save_directory, results, failed)
+
+        print(f"{len(results)} succeeded, {len(failed)} failed")
+        if failed:
+            print(f"Failed systems: {list(failed.keys())}")
         print(f"{self.mlip_name} Relative Energy Calculation Complete ({task_desc})")
         return save_directory
     
@@ -262,7 +268,7 @@ class RelativeEnergyCalculation:
         
         return surface_area
     
-    def _save_results(self, save_directory, results):
+    def _save_results(self, save_directory, results, failures=None):
         """Save calculation results to JSON file."""
         output_suffixes = {
             "surface": "_surface_energy_result.json",
@@ -270,9 +276,9 @@ class RelativeEnergyCalculation:
             "custom": "_custom_result.json"
         }
         output_file = f"{self.mlip_name}{output_suffixes[self.task_type]}"
-        
+
         output_path = os.path.join(save_directory, output_file)
-        
+
         # Add calculation metadata
         results_with_metadata = {
             "task_type": self.task_type,
@@ -280,7 +286,10 @@ class RelativeEnergyCalculation:
             "benchmark": self.benchmark,
             "results": results
         }
-        
+        # Record per-system failures so a partial run is self-documenting.
+        if failures:
+            results_with_metadata["_failures"] = failures
+
         save_json(results_with_metadata, output_path)
         
         print(f"Results saved to: {output_path}")

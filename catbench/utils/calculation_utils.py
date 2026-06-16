@@ -12,6 +12,7 @@ from copy import deepcopy
 
 import numpy as np
 from ase.constraints import FixAtoms
+from ase.geometry import find_mic
 from ase.io import read, write
 from ase.optimize import LBFGS, BFGS, GPMin, FIRE, MDMin, BFGSLineSearch, LBFGSLineSearch
 
@@ -215,8 +216,12 @@ def calc_displacement(atoms1, atoms2, fixed_indices=None):
     positions1 = atoms1.get_positions()
     positions2 = atoms2.get_positions()
 
-    # Calculate displacement for each atom
-    displacement_magnitudes = np.linalg.norm(positions2 - positions1, axis=1)
+    # Calculate displacement for each atom.
+    # Apply the minimum-image convention so displacements are correct for
+    # non-orthogonal cells and atoms that wrapped across a periodic boundary.
+    diffs = positions2 - positions1
+    mic_diffs, _ = find_mic(diffs, atoms1.cell, atoms1.pbc)
+    displacement_magnitudes = np.linalg.norm(mic_diffs, axis=1)
 
     # Maximum displacement of any atom
     max_disp = np.max(displacement_magnitudes)
@@ -248,20 +253,29 @@ def calc_displacement(atoms1, atoms2, fixed_indices=None):
 
 
 def find_median_index(arr):
-    """Find index of median value in array."""
-    orig_arr = deepcopy(arr)
-    sorted_arr = sorted(arr)
-    length = len(sorted_arr)
-    median_index = (length - 1) // 2
-    median_value = sorted_arr[median_index]
-    for i, num in enumerate(orig_arr):
-        if num == median_value:
-            return i, median_value
+    """Find the original index of the median-rank value in an array.
+
+    NaN-safe and deterministic: NaN values sort to the end (numpy argsort
+    behavior), so a diverged energy never yields a None return. The element at
+    the median RANK is returned (not the first ``== median_value`` match), so
+    under duplicate energies ties now break by rank position, which may give a
+    slightly different median_num than the previous implementation. This is the
+    correct, deterministic behavior.
+
+    Returns:
+        tuple[int, float]: (original index of the median-rank element, its value)
+    """
+    a = np.asarray(arr, dtype=float)
+    if a.size == 0:
+        raise ValueError("find_median_index: empty array")
+    order = np.argsort(a, kind="stable")   # NaN sorts to the end deterministically
+    median_index = int(order[(a.size - 1) // 2])
+    return median_index, float(a[median_index])
 
 
 def fix_z(atoms, rate_fix):
     """Calculate z-coordinate for fixing atoms based on rate."""
-    if rate_fix != None:
+    if rate_fix is not None:
         z_max = max(atoms.positions[:, 2])
         z_min = min(atoms.positions[:, 2])
         z_target = z_min + rate_fix * (z_max - z_min)

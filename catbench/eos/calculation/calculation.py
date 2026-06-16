@@ -7,6 +7,7 @@ This module performs single point energy calculations for EOS benchmarking.
 import os
 import json
 import io
+import traceback
 import numpy as np
 from ase.io import read, write
 from catbench.utils.calculation_utils import energy_cal_single
@@ -77,7 +78,8 @@ class EOSCalculation:
         
         # Results dictionary
         results = {}
-        
+        failed = {}
+
         # Process each material
         for material_name, material_data in self.data.items():
             print(f"\nProcessing material: {material_name}")
@@ -133,6 +135,10 @@ class EOSCalculation:
                         "n_atoms": len(atoms),
                         "error": str(e)
                     })
+                    failed[f"{material_name}/{folder_name}"] = {
+                        "error": repr(e),
+                        "traceback": traceback.format_exc()[-2000:],
+                    }
             
             # Calculate MLIP equilibrium if all calculations succeeded
             valid_points = [p for p in material_results["points"] if p["mlip_energy"] is not None]
@@ -156,11 +162,15 @@ class EOSCalculation:
             results[material_name] = material_results
         
         # Save results
-        self._save_results(save_directory, results)
-        
-        print(f"\n{self.mlip_name} EOS Calculation Complete")
+        self._save_results(save_directory, results, failed)
+
+        total_points = sum(len(m["points"]) for m in results.values())
+        print(f"\n{total_points - len(failed)} succeeded, {len(failed)} failed")
+        if failed:
+            print(f"Failed points: {list(failed.keys())}")
+        print(f"{self.mlip_name} EOS Calculation Complete")
         print(f"Results saved to: {save_directory}")
-        
+
         return save_directory
     
     def _setup_directories(self):
@@ -169,18 +179,21 @@ class EOSCalculation:
         os.makedirs(save_directory, exist_ok=True)
         return save_directory
     
-    def _save_results(self, save_directory, results):
+    def _save_results(self, save_directory, results, failures=None):
         """Save calculation results to JSON file."""
         output_file = f"{self.mlip_name}_eos_result.json"
         output_path = os.path.join(save_directory, output_file)
-        
+
         # Add metadata
         results_with_metadata = {
             "mlip_name": self.mlip_name,
             "benchmark": self.benchmark,
             "results": results
         }
-        
+        # Record per-point failures so a partial run is self-documenting.
+        if failures:
+            results_with_metadata["_failures"] = failures
+
         save_json(results_with_metadata, output_path)
         
         print(f"Results saved to: {output_path}")

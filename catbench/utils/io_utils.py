@@ -108,8 +108,9 @@ def load_existing_results(save_directory: str, mlip_name: str) -> Tuple[Dict, Di
     result_path = os.path.join(save_directory, f"{mlip_name}_result.json")
     result_data = load_json(result_path, {})
     
-    # Extract completed reactions (excluding calculation_settings)
-    final_result = {k: v for k, v in result_data.items() if k != "calculation_settings"}
+    # Extract completed reactions (excluding metadata keys that are not reactions)
+    _non_reaction_keys = {"calculation_settings", "_failures"}
+    final_result = {k: v for k, v in result_data.items() if k not in _non_reaction_keys}
     
     # Load gas energies
     gas_path = os.path.join(save_directory, f"{mlip_name}_gases.json")
@@ -132,15 +133,21 @@ def save_calculation_results(save_directory: str, mlip_name: str,
                             result_data: Dict[str, Any],
                             gas_energies: Optional[Dict] = None,
                             gas_energies_single: Optional[Dict] = None,
-                            calculation_settings: Optional[Dict] = None) -> None:
+                            calculation_settings: Optional[Dict] = None,
+                            failures: Optional[Dict] = None) -> None:
     """Save calculation results to JSON files."""
     # Create result dictionary with calculation_settings first
     result_with_settings = {}
     if calculation_settings:
         result_with_settings["calculation_settings"] = calculation_settings
-    
+
     # Add all other data after calculation_settings
     result_with_settings.update(result_data)
+
+    # Record per-reaction failures so a partial run is self-documenting.
+    # "_failures" is excluded from reaction iteration on resume.
+    if failures:
+        result_with_settings["_failures"] = failures
     
     # Save main results
     result_path = os.path.join(save_directory, f"{mlip_name}_result.json")
@@ -167,4 +174,16 @@ def save_anomaly_detection_results(calculating_path: str, mlip_name: str,
 def get_calculation_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     """Extract calculation settings for saving to result file."""
     settings_keys = ["optimizer", "f_crit_relax", "n_crit_relax", "rate", "damping", "save_step", "chemical_bond_cutoff"]
-    return {k: config.get(k) for k in settings_keys if k in config}
+    settings = {k: config.get(k) for k in settings_keys if k in config}
+
+    # Stamp version + constraint mode so old (legacy z-coordinate fixing) and
+    # new (FixAtoms-based) result files are distinguishable after the fact.
+    try:
+        from importlib.metadata import version
+        catbench_version = version("catbench")
+    except Exception:
+        catbench_version = "1.1.0"
+    settings["catbench_version"] = catbench_version
+    settings["constraint_mode"] = "legacy_z" if config.get("rate") is not None else "fixatoms"
+
+    return settings

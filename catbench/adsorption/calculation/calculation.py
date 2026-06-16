@@ -8,8 +8,10 @@ adsorption energy benchmarking calculations with MLIPs.
 import json
 import os
 import shutil
+import traceback
 
 import numpy as np
+from ase.geometry import find_mic
 from ase.io import write
 
 from catbench.config import CALCULATION_DEFAULTS, get_default
@@ -176,14 +178,15 @@ class AdsorptionCalculation:
         ref_data = self._load_data()
         save_directory = self._setup_directories()
         final_result, gas_energies, gas_energies_single = self._load_existing_results(save_directory)
-        
+        failed = {}
+
         print("Starting calculations...")
         for index, key in enumerate(ref_data):
             # Skip if already calculated
             if key in final_result:
                 print(f"Skipping already calculated {key}")
                 continue
-                
+
             # Clean up any incomplete attempts (only if save_files is True)
             if self.config.get("save_files", True):
                 log_path = f"{save_directory}/log/{key}"
@@ -203,17 +206,21 @@ class AdsorptionCalculation:
                 # Save results every save_step calculations
                 if len(final_result) % self.config["save_step"] == 0:
                     print(f"Saving results at {len(final_result)} calculations...")
-                    self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single)
-                
+                    self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single, failed)
+
             except Exception as e:
                 print(f"Error occurred while processing {key}: {str(e)}")
                 print("Skipping to next reaction...")
+                failed[key] = {"error": repr(e), "traceback": traceback.format_exc()[-2000:]}
                 continue
-        
+
         # Final save to ensure all results are saved
         print(f"Final save: {len(final_result)} total calculations")
-        self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single)
-        
+        self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single, failed)
+
+        print(f"{len(final_result)} succeeded, {len(failed)} failed")
+        if failed:
+            print(f"Failed reactions: {list(failed.keys())}")
         print(f"{self.mlip_name} Benchmarking Finish")
         return save_directory
     
@@ -508,33 +515,38 @@ class AdsorptionCalculation:
         ref_data = self._load_data()
         save_directory = self._setup_directories()
         final_result, _, _ = self._load_existing_results(save_directory)  # gas_energies not needed for OC20
-        
+        failed = {}
+
         print("Starting calculations...")
         for index, key in enumerate(ref_data):
             # Skip if already calculated
             if key in final_result:
                 print(f"Skipping already calculated {key}")
                 continue
-            
+
             try:
                 print(f"[{index+1}/{len(ref_data)}] {key}")
                 result = self._process_reaction_oc20(key, ref_data[key], save_directory)
                 final_result[key] = result["reaction_result"]
-                
+
                 # Save results every save_step calculations
                 if len(final_result) % self.config["save_step"] == 0:
                     print(f"Saving results at {len(final_result)} calculations...")
-                    self._save_results_oc20(save_directory, final_result)
-                
+                    self._save_results_oc20(save_directory, final_result, failed)
+
             except Exception as e:
                 print(f"Error occurred while processing {key}: {str(e)}")
                 print("Skipping to next reaction...")
+                failed[key] = {"error": repr(e), "traceback": traceback.format_exc()[-2000:]}
                 continue
-        
+
         # Final save to ensure all results are saved
         print(f"Final save: {len(final_result)} total calculations")
-        self._save_results_oc20(save_directory, final_result)
-        
+        self._save_results_oc20(save_directory, final_result, failed)
+
+        print(f"{len(final_result)} succeeded, {len(failed)} failed")
+        if failed:
+            print(f"Failed reactions: {list(failed.keys())}")
         print(f"{self.mlip_name} Benchmarking Finish")
         return save_directory
     
@@ -668,21 +680,22 @@ class AdsorptionCalculation:
         
         return {"reaction_result": result, "time_consumed": time_consumed}
     
-    def _save_results_basic(self, save_directory, final_result, gas_energies, gas_energies_single):
+    def _save_results_basic(self, save_directory, final_result, gas_energies, gas_energies_single, failures=None):
         """Save results for basic mode."""
         calculation_settings = get_calculation_settings(self.config)
         save_calculation_results(
             save_directory, self.mlip_name,
             final_result, gas_energies, gas_energies_single,
-            calculation_settings
+            calculation_settings, failures=failures
         )
-    
-    def _save_results_oc20(self, save_directory, final_result):
+
+    def _save_results_oc20(self, save_directory, final_result, failures=None):
         """Save results for OC20 mode."""
         calculation_settings = get_calculation_settings(self.config)
         save_calculation_results(
             save_directory, self.mlip_name,
-            final_result, calculation_settings=calculation_settings
+            final_result, calculation_settings=calculation_settings,
+            failures=failures
         )
     
     def _calculate_max_bond_change(self, initial_atoms, final_atoms, adsorbate_indices):
@@ -740,32 +753,17 @@ class AdsorptionCalculation:
         Returns:
             float: Maximum substrate displacement in Angstroms
         """
-        n_substrate = len(slab_initial)
-        
-        # Get substrate indices (all non-adsorbate atoms)
-        substrate_indices = [i for i in range(n_substrate) if i not in adsorbate_indices]
-        
+        # Substrate atoms are all non-adsorbate atoms, indexed in the adslab
+        # space (not the slab space) so they are correct even when adsorbate
+        # indices are not strictly trailing.
+        substrate_indices = [i for i in range(len(adslab_initial)) if i not in adsorbate_indices]
         if not substrate_indices:
             return 0.0
-            
-        max_disp = 0.0
-        
-        for idx in substrate_indices:
-            # Calculate displacement with PBC
-            pos_initial = adslab_initial[idx].position
-            pos_final = adslab_final[idx].position
-            
-            # Use cell to handle PBC properly
-            cell = adslab_initial.cell
-            diff = pos_final - pos_initial
-            
-            # Apply minimum image convention
-            for i in range(3):
-                if adslab_initial.pbc[i]:
-                    diff[i] = diff[i] - cell[i, i] * np.round(diff[i] / cell[i, i])
-            
-            displacement = np.linalg.norm(diff)
-            max_disp = max(max_disp, displacement)
-        
-        return max_disp
+
+        # Use ASE's minimum-image convention so displacements are correct for
+        # non-orthogonal cells (e.g. hexagonal fcc(111)/hcp) and wrapped atoms.
+        diffs = (adslab_final.get_positions()[substrate_indices]
+                 - adslab_initial.get_positions()[substrate_indices])
+        mic_diffs, _ = find_mic(diffs, adslab_initial.cell, adslab_initial.pbc)
+        return float(np.linalg.norm(mic_diffs, axis=1).max())
  

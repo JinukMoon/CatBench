@@ -19,7 +19,7 @@ from ase.io import read
 from catbench.config import ANALYSIS_DEFAULTS, get_default, PLOT_COLORS, PLOT_MARKERS
 from catbench.utils.analysis_utils import (
     find_adsorbate, min_max, set_matplotlib_font, get_ads_eng_range, prepare_plot_data,
-    get_calculator_keys, get_median_calculator_key
+    get_calculator_keys, get_median_calculator_key, classify_reaction, safe_mae, write_cell
 )
 from catbench.utils.io_utils import save_anomaly_detection_results
 class AdsorptionAnalysis:
@@ -261,8 +261,18 @@ class AdsorptionAnalysis:
         n_points = len(dft_data)
 
         if n_points == 0:
-            # No data to plot - create empty plot and return 0 MAE
-            MAE = 0.0
+            # No data to plot. Record nan (NOT 0.0, which would be
+            # indistinguishable from a perfect score) and skip the misleading
+            # parity plot entirely; stamp the figure "NO DATA" before closing.
+            ax.text(
+                x=0.5, y=0.5,
+                s="NO DATA",
+                transform=ax.transAxes,
+                fontsize=self.mae_text_fontsize,
+                ha="center", va="center", color="gray",
+            )
+            plt.close()
+            return np.nan
         else:
             # Single mono plot uses single color and marker
             scatter = ax.scatter(
@@ -353,9 +363,9 @@ class AdsorptionAnalysis:
             mlip_data = plot_data["MLIP"]
             n_points = len(dft_data)
 
-            # Skip if no data for this adsorbate
+            # Skip if no data for this adsorbate (nan, not 0.0)
             if n_points == 0:
-                MAEs[adsorbate] = 0.0
+                MAEs[adsorbate] = np.nan
                 MAEs[f"len_{adsorbate}"] = 0
                 continue
 
@@ -399,14 +409,14 @@ class AdsorptionAnalysis:
             len_total += n_points
             MAEs[f"len_{adsorbate}"] = n_points
 
-        # Calculate total MAE
-        MAE_total = error_sum / len_total if len_total != 0 else 0
+        # Calculate total MAE (nan when there is no data at all)
+        MAE_total = error_sum / len_total if len_total != 0 else np.nan
         MAEs["total"] = MAE_total
 
         display_name = self._display_mlip_name(mlip_name)
         mae_label = f"MAE-{display_name}: {MAE_total:.2f}"
 
-        if not self.mae_text_off:
+        if not self.mae_text_off and len_total != 0:
             ax.text(
                 x=0.05, y=0.95,
                 s=mae_label,
@@ -449,6 +459,11 @@ class AdsorptionAnalysis:
                 )
                 fig_legend.savefig(f"{multi_path}/legend.png", dpi=self.dpi, bbox_inches="tight")
                 plt.close(fig_legend)
+
+        # Skip saving a misleading "clean" parity plot when there is no data at all.
+        if len_total == 0:
+            plt.close()
+            return MAEs
 
         plt.savefig(f"{multi_path}/{tag}.png", dpi=self.dpi, bbox_inches='tight')
         plt.close()
@@ -493,7 +508,7 @@ class AdsorptionAnalysis:
                         anomaly_rate = (anomaly_count / total_count) * 100 if total_count > 0 else 0
 
                         # Calculate single MAE for this specific adsorbate
-                        single_mae_adsorbate = data_dict.get("single_mae", {}).get(adsorbate, 0.0)
+                        single_mae_adsorbate = data_dict.get("single_mae", {}).get(adsorbate, np.nan)
 
                         # Use cached ADwT and AMDwT values for this adsorbate
                         cache_key = (mlip_name, adsorbate)
@@ -705,15 +720,15 @@ class AdsorptionAnalysis:
             worksheet.write(row, col + 3, data["Energy_anomaly_rate"], number_format_2f)
             col += 4
 
-            # MAE values
-            worksheet.write(row, col, data["MAE_total"], number_format_3f)
-            worksheet.write(row, col + 1, data["MAE_normal"], number_format_3f)
-            worksheet.write(row, col + 2, data["MAE_single"], number_format_3f)
+            # MAE values (blank cell for nan / no-data)
+            write_cell(worksheet, row, col, data["MAE_total"], number_format_3f)
+            write_cell(worksheet, row, col + 1, data["MAE_normal"], number_format_3f)
+            write_cell(worksheet, row, col + 2, data["MAE_single"], number_format_3f)
             col += 3
 
-            # ADwT and AMDwT metrics
-            worksheet.write(row, col, data["ADwT"], number_format_3f)
-            worksheet.write(row, col + 1, data["AMDwT"], number_format_3f)
+            # ADwT and AMDwT metrics (blank cell for nan / no-data)
+            write_cell(worksheet, row, col, data["ADwT"], number_format_3f)
+            write_cell(worksheet, row, col + 1, data["AMDwT"], number_format_3f)
             col += 2
 
             # Numbers and time
@@ -893,15 +908,15 @@ class AdsorptionAnalysis:
             worksheet.write(row, col, data["Adsorbate_name"], bold_center_align)
             col += 1
 
-            # MAE values
-            worksheet.write(row, col, data["MAE_total"], number_format_3f)
-            worksheet.write(row, col + 1, data["MAE_normal"], number_format_3f)
-            worksheet.write(row, col + 2, data["MAE_single"], number_format_3f)
+            # MAE values (blank cell for nan / no-data)
+            write_cell(worksheet, row, col, data["MAE_total"], number_format_3f)
+            write_cell(worksheet, row, col + 1, data["MAE_normal"], number_format_3f)
+            write_cell(worksheet, row, col + 2, data["MAE_single"], number_format_3f)
             col += 3
 
-            # ADwT and AMDwT metrics
-            worksheet.write(row, col, data["ADwT"], number_format_3f)
-            worksheet.write(row, col + 1, data["AMDwT"], number_format_3f)
+            # ADwT and AMDwT metrics (blank cell for nan / no-data)
+            write_cell(worksheet, row, col, data["ADwT"], number_format_3f)
+            write_cell(worksheet, row, col + 1, data["AMDwT"], number_format_3f)
             col += 2
 
             # Numbers
@@ -1194,28 +1209,31 @@ class AdsorptionAnalysis:
 
             migration_anomalies = bond_changes > bond_threshold_pct
 
-            # Hierarchical classification using vectorized operations
-            classifications = np.zeros(n_reactions, dtype=int)
-            # 0 = normal, 1 = energy_anomaly, 2 = adsorbate_migration, 3 = unphysical_relaxation, 4 = reproduction_failure
-
-            # Apply hierarchical rules (order matters!)
-            classifications[seed_anomalies] = 4  # Highest priority
-            classifications[(classifications == 0) & displacement_anomalies] = 3
-            classifications[(classifications == 0) & migration_anomalies] = 2
-            classifications[(classifications == 0) & energy_anomalies] = 1
-            # Remaining zeros are normal
-
-            # Count each category
-            unique, counts = np.unique(classifications, return_counts=True)
-            category_counts = dict(zip(unique, counts))
+            # Classify each reaction through the SHARED classifier so the
+            # threshold path and the live anomaly detection can never diverge.
+            category_counts = {
+                "normal": 0,
+                "energy_anomaly": 0,
+                "adsorbate_migration": 0,
+                "unphysical_relaxation": 0,
+                "reproduction_failure": 0,
+            }
+            for idx in range(n_reactions):
+                category = classify_reaction(
+                    bool(seed_anomalies[idx]),
+                    bool(displacement_anomalies[idx]),
+                    bool(migration_anomalies[idx]),
+                    bool(energy_anomalies[idx]),
+                )
+                category_counts[category] += 1
 
             # Calculate percentages
             total = n_reactions
-            results_data["normal"].append(category_counts.get(0, 0) / total * 100)
-            results_data["energy_anomaly"].append(category_counts.get(1, 0) / total * 100)
-            results_data["adsorbate_migration"].append(category_counts.get(2, 0) / total * 100)
-            results_data["unphysical_relaxation"].append(category_counts.get(3, 0) / total * 100)
-            results_data["reproduction_failure"].append(category_counts.get(4, 0) / total * 100)
+            results_data["normal"].append(category_counts["normal"] / total * 100)
+            results_data["energy_anomaly"].append(category_counts["energy_anomaly"] / total * 100)
+            results_data["adsorbate_migration"].append(category_counts["adsorbate_migration"] / total * 100)
+            results_data["unphysical_relaxation"].append(category_counts["unphysical_relaxation"] / total * 100)
+            results_data["reproduction_failure"].append(category_counts["reproduction_failure"] / total * 100)
 
         return results_data
 
@@ -1714,7 +1732,7 @@ class AdsorptionAnalysis:
         if len(plot_data["DFT"]) > 0:
             return np.sum(np.abs(plot_data["DFT"] - plot_data["MLIP"])) / len(plot_data["DFT"])
         else:
-            return 0.0
+            return np.nan
 
     def _calculate_maes_by_adsorbate(self, ads_data, types, analysis_adsorbates):
         """Calculate MAEs by adsorbate without generating plots."""
@@ -1727,7 +1745,7 @@ class AdsorptionAnalysis:
 
             mae = (
                 np.sum(np.abs(plot_data["DFT"] - plot_data["MLIP"])) / len(plot_data["DFT"])
-                if len(plot_data["DFT"]) != 0 else 0
+                if len(plot_data["DFT"]) != 0 else np.nan
             )
             MAEs[adsorbate] = mae
             error_sum += np.sum(np.abs(plot_data["DFT"] - plot_data["MLIP"]))
@@ -1735,7 +1753,7 @@ class AdsorptionAnalysis:
             MAEs[f"len_{adsorbate}"] = len(plot_data["DFT"])
 
         # Calculate total MAE
-        MAE_total = error_sum / len_total if len_total != 0 else 0
+        MAE_total = error_sum / len_total if len_total != 0 else np.nan
         MAEs["total"] = MAE_total
 
         return MAEs
@@ -1772,7 +1790,7 @@ class AdsorptionAnalysis:
                 mlip_array = np.array(mlip_values)
                 adsorbate_mae[target_adsorbate] = np.mean(np.abs(dft_array - mlip_array))
             else:
-                adsorbate_mae[target_adsorbate] = 0.0
+                adsorbate_mae[target_adsorbate] = np.nan
 
         return adsorbate_mae
 
@@ -1806,7 +1824,7 @@ class AdsorptionAnalysis:
             mlip_array = np.array(mlip_values)
             return np.mean(np.abs(dft_array - mlip_array))
         else:
-            return 0.0
+            return np.nan
 
     def _calculate_adwt(self, mlip_result, analysis_adsorbates):
         """
@@ -1853,7 +1871,7 @@ class AdsorptionAnalysis:
                         pos_mae_values.append(calc_data["adslab_pos_mae"])
 
         if not pos_mae_values:
-            return 0.0
+            return np.nan
 
         # Convert to numpy array for fast operations
         pos_mae_array = np.array(pos_mae_values)
@@ -1919,7 +1937,7 @@ class AdsorptionAnalysis:
                         max_disp_values.append(calc_data["adslab_max_disp"])
 
         if not max_disp_values:
-            return 0.0
+            return np.nan
 
         # Convert to numpy array for fast operations
         max_disp_array = np.array(max_disp_values)
@@ -1985,7 +2003,7 @@ class AdsorptionAnalysis:
                         pos_mae_values.append(calc_data["adslab_pos_mae"])
 
         if not pos_mae_values:
-            return 0.0
+            return np.nan
 
         # Convert to numpy array for fast operations
         pos_mae_array = np.array(pos_mae_values)
@@ -2056,7 +2074,7 @@ class AdsorptionAnalysis:
                         max_disp_values.append(calc_data["adslab_max_disp"])
 
         if not max_disp_values:
-            return 0.0
+            return np.nan
 
         # Convert to numpy array for fast operations
         max_disp_array = np.array(max_disp_values)
@@ -2074,7 +2092,7 @@ class AdsorptionAnalysis:
 
         # Calculate AMDwT as average of all MDwT values
         result = sum(mdwt_values) / len(mdwt_values)
-        
+
         # Store in cache
         if hasattr(self, '_calculation_cache'):
             cache_key = (id(mlip_result), target_adsorbate, 'amdwt')
@@ -2343,12 +2361,21 @@ class AdsorptionAnalysis:
                 anomalies["slab_move"] = 0
                 anomalies["slab_seed"] = 0
 
-            # Fast classification (same priority order as original)
-            if anomalies["slab_seed"] > 0 or anomalies["ads_seed"] > 0 or anomalies["ads_eng_seed"] > 0:
-                classification = "reproduction_failure"
+            # Shared classification (single source of truth, see classify_reaction)
+            seed_flag = (anomalies["slab_seed"] > 0 or anomalies["ads_seed"] > 0 or
+                         anomalies["ads_eng_seed"] > 0)
+            unphysical_flag = (anomalies["slab_conv"] > 0 or anomalies["ads_conv"] > 0 or
+                               anomalies["slab_move"] > 0 or anomalies["ads_move"] > 0)
+            migration_flag = anomalies["adsorbate_migration"] > 0
+            energy_flag = anomalies["energy_anomaly"] > 0
+
+            classification = classify_reaction(
+                seed_flag, unphysical_flag, migration_flag, energy_flag
+            )
+
+            if classification == "reproduction_failure":
                 anomaly_detection_result["reproduction_failure"].append(reaction)
-            elif anomalies["slab_conv"] > 0 or anomalies["ads_conv"] > 0 or anomalies["slab_move"] > 0 or anomalies["ads_move"] > 0:
-                classification = "unphysical_relaxation"
+            elif classification == "unphysical_relaxation":
                 # Record which specific unphysical issues occurred
                 unphysical_issues = []
                 if anomalies["slab_conv"] > 0:
@@ -2364,14 +2391,11 @@ class AdsorptionAnalysis:
                     "reaction": reaction,
                     "issues": unphysical_issues
                 })
-            elif anomalies["adsorbate_migration"] > 0:
-                classification = "adsorbate_migration"
+            elif classification == "adsorbate_migration":
                 anomaly_detection_result["adsorbate_migration"].append(reaction)
-            elif anomalies["energy_anomaly"] > 0:
-                classification = "energy_anomaly"
+            elif classification == "energy_anomaly":
                 anomaly_detection_result["energy_anomaly"].append(reaction)
             else:
-                classification = "normal"
                 anomaly_detection_result["normal"].append(reaction)
 
             anomaly_summary[reaction] = {

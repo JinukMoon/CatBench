@@ -14,6 +14,82 @@ def find_adsorbate(data):
             return key[: -len("star_tot_eng")]
 
 
+def classify_reaction(seed, unphysical, migration, energy):
+    """
+    Classify a reaction into one of the 5 anomaly categories.
+
+    This is the single shared classifier used by both the live anomaly
+    detection (headline Excel counts) and the threshold-sensitivity analysis,
+    so the two paths can never disagree at edge cases.
+
+    The priority order is fixed (highest first):
+        reproduction_failure > unphysical_relaxation
+        > adsorbate_migration > energy_anomaly > normal
+
+    Args:
+        seed: bool, any reproduction/seed-range anomaly is present
+        unphysical: bool, any convergence or displacement anomaly is present
+        migration: bool, adsorbate migration (bond change) anomaly is present
+        energy: bool, energy anomaly is present
+
+    Returns:
+        str: one of "reproduction_failure", "unphysical_relaxation",
+             "adsorbate_migration", "energy_anomaly", "normal"
+    """
+    if seed:
+        return "reproduction_failure"
+    elif unphysical:
+        return "unphysical_relaxation"
+    elif migration:
+        return "adsorbate_migration"
+    elif energy:
+        return "energy_anomaly"
+    else:
+        return "normal"
+
+
+def safe_mae(dft_values, mlip_values):
+    """
+    Compute mean absolute error, returning np.nan (not 0.0) for empty input.
+
+    Reserving np.nan for the no-data case keeps a genuine computed MAE of 0.0
+    distinguishable from "no data was available".
+
+    Args:
+        dft_values: array-like of reference values
+        mlip_values: array-like of predicted values
+
+    Returns:
+        float: mean absolute error, or np.nan if there are no data points
+    """
+    dft_arr = np.asarray(dft_values, dtype=float)
+    mlip_arr = np.asarray(mlip_values, dtype=float)
+    if dft_arr.size == 0:
+        return np.nan
+    return float(np.mean(np.abs(dft_arr - mlip_arr)))
+
+
+def write_cell(worksheet, row, col, value, cell_format):
+    """
+    Write a numeric cell, rendering nan/None as a blank cell.
+
+    xlsxwriter raises on nan by default; more importantly a blank cell avoids
+    presenting "0.000" for a metric that has no data (which would be
+    indistinguishable from a genuine zero / perfect score).
+
+    Args:
+        worksheet: xlsxwriter worksheet
+        row: row index
+        col: column index
+        value: numeric value (may be nan/None for no-data)
+        cell_format: xlsxwriter format object
+    """
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        worksheet.write(row, col, "", cell_format)
+    else:
+        worksheet.write(row, col, value, cell_format)
+
+
 def min_max(dft_values):
     """
     Calculate plot axis limits with padding.
