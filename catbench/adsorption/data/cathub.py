@@ -169,7 +169,7 @@ def aseify_reactions(reactions):
         }
 
 
-def cathub_preprocessing(benchmark, adsorbate_integration=None):
+def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constraints=True):
     """
     Download and preprocess CatHub data for MLIP benchmarking.
     
@@ -531,7 +531,7 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None):
                     )
 
                 for structure_key in data_total[tag]["raw"]:
-                    if "star" in structure_key:
+                    if require_constraints and "star" in structure_key:
                         if not _has_fixatoms(data_total[tag]["raw"][structure_key]["atoms"]):
                             # Drop the partially-stored entry so the reaction is
                             # cleanly skipped (the raise is logged by the outer handler).
