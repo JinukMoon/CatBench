@@ -15,6 +15,7 @@ import requests
 import io
 import logging
 from ase.io import read
+from ase.constraints import FixAtoms
 from catbench.utils.io_utils import get_raw_data_directory, get_raw_data_path, save_json
 
 GRAPHQL = "http://api.catalysis-hub.org/graphql"
@@ -38,13 +39,19 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
         List of reaction data
     """
     reactions = []
+    seen_ids = set()
     has_next_page = True
     start_cursor = ""
     page = 0
+    total_count = None
     while has_next_page:
+        # `order: "id"` enforces a stable total ordering for cursor pagination.
+        # Without it, CatHub's default row order is not stable across pages, so
+        # paging with `after: endCursor` silently returns some reactions twice and
+        # skips an equal number -- yielding non-deterministic, incomplete downloads.
         data = fetch(
             f"""{{
-      reactions(pubId: "{pub_id}", first: {page_size}, after: "{start_cursor}") {{
+      reactions(pubId: "{pub_id}", first: {page_size}, after: "{start_cursor}", order: "id") {{
         totalCount
         pageInfo {{
           hasNextPage
@@ -54,6 +61,7 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
         }}
         edges {{
           node {{
+            id
             Equation
             reactants
             products
@@ -62,6 +70,7 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
               name
               systems {{
                 energy
+                constraints
                 InputFile(format: "json")
               }}
             }}
@@ -73,16 +82,36 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
         has_next_page = data["reactions"]["pageInfo"]["hasNextPage"]
         start_cursor = data["reactions"]["pageInfo"]["endCursor"]
         page += 1
-        
+
         # Log download progress
         total_count = data["reactions"]["totalCount"]
         downloaded_so_far = page_size * page if page_size * page < total_count else total_count
-        
+
         if logger:
             logger.info(f"Downloaded {downloaded_so_far}/{total_count} reactions for {pub_id} "
                        f"({downloaded_so_far/total_count*100:.1f}% complete)")
-        
-        reactions.extend(map(lambda x: x["node"], data["reactions"]["edges"]))
+
+        # Dedup by CatHub reaction id as a safety net against any residual
+        # pagination overlap. With `order: "id"` this should never trigger.
+        for edge in data["reactions"]["edges"]:
+            node = edge["node"]
+            rid = node.get("id")
+            if rid is not None and rid in seen_ids:
+                continue
+            if rid is not None:
+                seen_ids.add(rid)
+            reactions.append(node)
+
+    # Completeness check: the unique download count must match the server-reported
+    # total. A mismatch means the dataset is incomplete (do not trust a cached file
+    # that fails this check -- delete and re-download).
+    if total_count is not None and len(reactions) != total_count:
+        msg = (f"Downloaded {len(reactions)} unique reactions but CatHub reports "
+               f"totalCount={total_count} for {pub_id}; dataset may be incomplete.")
+        if logger:
+            logger.warning(msg)
+        else:
+            print(f"WARNING: {msg}")
 
     return reactions
 
@@ -103,6 +132,24 @@ def aseify_reactions(reactions):
                 tmp_file.seek(0)
                 atoms = read(tmp_file, format="json")
                 atoms.pbc = True
+
+                # Attach the real FixAtoms constraints from CatHub (if any).
+                # gas/bulk legitimately have constraints=None and get no constraint.
+                constraints_json = system_info.get("constraints")
+                if constraints_json:
+                    try:
+                        cons_list = json.loads(constraints_json)
+                    except (TypeError, ValueError):
+                        cons_list = []
+                    fix_constraints = []
+                    for c in cons_list:
+                        if isinstance(c, dict) and c.get("name") == "FixAtoms":
+                            idx = sorted(set(int(x) for x in c.get("kwargs", {}).get("indices", [])))
+                            if idx:
+                                fix_constraints.append(FixAtoms(indices=idx))
+                    if fix_constraints:
+                        atoms.set_constraint(fix_constraints)
+
                 reactions[i]["reactionSystems"][j]["atoms"] = atoms
 
             reactions[i]["reactionSystems"][j]["energy"] = system_info["energy"]
@@ -265,6 +312,40 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None):
         
         # Process combined reactions
         dat = copy.deepcopy(combined_reactions)
+
+        # Deterministic dedup safety net. New downloads carry a CatHub `id`; older
+        # cached raw files (downloaded before the ordering fix) do not, so fall back
+        # to a content signature. This removes the duplicate inflation a previous
+        # unstable-pagination download may have baked into a cached `{bench}.json`.
+        # NOTE: dedup cannot recover reactions that were *dropped* -- if a cache is
+        # incomplete, delete it and re-download.
+        def _reaction_signature(rxn):
+            rid = rxn.get("id")
+            if rid is not None:
+                return ("id", rid)
+            systems = tuple(sorted(
+                (rs.get("name"), round(rs.get("systems", {}).get("energy", 0.0), 4))
+                for rs in rxn.get("reactionSystems", [])
+            ))
+            return ("content", rxn.get("Equation"), round(rxn.get("reactionEnergy", 0.0), 4), systems)
+
+        deduped = []
+        seen_sig = set()
+        dup_dropped = 0
+        for rxn in dat:
+            sig = _reaction_signature(rxn)
+            if sig in seen_sig:
+                dup_dropped += 1
+                continue
+            seen_sig.add(sig)
+            deduped.append(rxn)
+        if dup_dropped:
+            logger.warning(f"Dropped {dup_dropped} duplicate reaction(s) from input "
+                           f"({len(dat)} -> {len(deduped)}). Source download was likely "
+                           f"produced by a pre-fix unstable pagination; consider re-downloading "
+                           f"to also recover any reactions that were skipped.")
+        dat = deduped
+
         logger.info("Converting reaction data to ASE atoms objects...")
         aseify_reactions(dat)
 
@@ -293,13 +374,14 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None):
                     sym = dat[i]["reactionSystems"][first_key]["atoms"].get_chemical_formula()
                 
                 reaction_name = dat[i]["Equation"]
-                tag = sym + "_" + reaction_name
-                if tag in tags:
-                    count = tags.count(tag)
-                    tags.append(tag)
-                    tag = f"{tag}_{count}"
-                else:
-                    tags.append(tag)
+                # Track the *base* tag in `tags` so the duplicate count stays
+                # consistent. The displayed tag gets a deterministic `_N` suffix
+                # only for genuine collisions (distinct reactions sharing the same
+                # formula + equation). `base_tag` is what we add/remove for counting.
+                base_tag = sym + "_" + reaction_name
+                count = tags.count(base_tag)
+                tags.append(base_tag)
+                tag = base_tag if count == 0 else f"{base_tag}_{count}"
 
 
 
@@ -379,8 +461,12 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None):
                     if adslab_key:
                         logger.debug(f"  With adslab coeff=1: {energy_check_retry:.6f} eV (diff: {abs(dat[i]['reactionEnergy'] - energy_check_retry):.6f} eV)")
                     
-                    if tag in tags:
-                        tags.remove(tag)
+                    # Roll back the count bookkeeping using the base tag. The old
+                    # code removed the suffixed `tag` (e.g. "X_1"), which was never
+                    # added to `tags`, so removal silently failed and corrupted the
+                    # duplicate count for later collisions.
+                    if base_tag in tags:
+                        tags.remove(base_tag)
                     continue
 
                 # Apply adsorbate integration if specified
@@ -422,7 +508,31 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None):
                     # If we can't detect, set empty list
                     data_total[tag]["adsorbate_indices"] = []
                     logger.warning(f"Could not detect adsorbate indices for {tag}")
-                
+
+                # Strict missing-constraint check: CatHub normally stores FixAtoms
+                # for slabs/adslabs. A slab/adslab ("star"/"*star") with no FixAtoms
+                # is a data gap and cannot be benchmarked reliably. gas/bulk references
+                # legitimately carry no constraints and are exempt.
+                def _has_fixatoms(atoms):
+                    return any(
+                        isinstance(c, FixAtoms) and len(c.get_indices()) > 0
+                        for c in atoms.constraints
+                    )
+
+                for structure_key in data_total[tag]["raw"]:
+                    if "star" in structure_key:
+                        if not _has_fixatoms(data_total[tag]["raw"][structure_key]["atoms"]):
+                            # Drop the partially-stored entry so the reaction is
+                            # cleanly skipped (the raise is logged by the outer handler).
+                            data_total.pop(tag, None)
+                            raise ValueError(
+                                f"CatHub data gap: structure '{structure_key}' in reaction "
+                                f"'{tag}' has no FixAtoms constraint. CatHub normally stores "
+                                f"fixed-atom info for slabs/adslabs; this dataset entry is "
+                                f"missing it and cannot be benchmarked reliably. "
+                                f"(gas/bulk references are exempt.)"
+                            )
+
                 # Log successful processing
                 logger.debug(f"Successfully processed reaction: {tag}")
                 logger.debug(f"  Reaction energy: {dat[i]['reactionEnergy']:.6f} eV")

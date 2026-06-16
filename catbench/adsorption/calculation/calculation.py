@@ -14,8 +14,8 @@ from ase.io import write
 
 from catbench.config import CALCULATION_DEFAULTS, get_default
 from catbench.utils.calculation_utils import (
-    energy_cal_gas, energy_cal_single, energy_cal, 
-    calc_displacement, find_median_index, fix_z, NumpyEncoder
+    energy_cal_gas, energy_cal_single, energy_cal,
+    calc_displacement, find_median_index, fix_z, get_fixed_indices, NumpyEncoder
 )
 from catbench.utils.io_utils import (
     create_calculation_directories, get_result_directory, get_raw_data_path,
@@ -61,7 +61,7 @@ class AdsorptionCalculation:
         benchmark (str): Name of the benchmark dataset (JSON file basename).
         f_crit_relax (float, optional): Force convergence criterion in eV/Å. Default: 0.05
         n_crit_relax (int, optional): Maximum optimization steps. Default: 999
-        rate (float, optional): Fraction of atoms to fix (z-direction). Default: 0.5
+        rate (float, optional): If set, fixes the bottom `rate` fraction of atoms by z-coordinate (legacy override). Default None = use the structure's stored FixAtoms constraints.
         damping (float, optional): Damping factor for optimization. Default: 1.0
         optimizer (str, optional): ASE optimizer name. Default: "LBFGS"
         save_step (int, optional): Save results every N calculations. Default: 50
@@ -84,7 +84,7 @@ class AdsorptionCalculation:
                 - restart: Continue from previous calculation
                 - f_crit_relax: Force convergence criterion for relaxation
                 - n_crit_relax: Maximum number of relaxation steps
-                - rate: Learning rate for optimization
+                - rate: If set (float), fix bottom `rate` fraction of atoms by z-coordinate (legacy override); None = use the structure's stored FixAtoms constraints
                 - damping: Damping factor for optimization
                 
         Raises:
@@ -334,6 +334,7 @@ class AdsorptionCalculation:
             for structure in reaction_data["raw"]:
                 if "gas" not in str(structure):
                     POSCAR_str = reaction_data["raw"][structure]["atoms"]
+                    fixed_indices = get_fixed_indices(POSCAR_str, self.config["rate"], z_target)
                     (
                         energy_calculated,
                         steps_calculated,
@@ -346,18 +347,18 @@ class AdsorptionCalculation:
                         self.config["f_crit_relax"],
                         self.config["n_crit_relax"],
                         self.config["damping"],
-                        z_target,
+                        fixed_indices,
                         self.config["optimizer"],
                         f"{log_path}/{structure}_{i}.txt" if log_path else None,
                         f"{traj_path}/{structure}_{i}" if traj_path else None,
                     )
-                    
+
                     ads_energy_calc += energy_calculated * reaction_data["raw"][structure]["stoi"]
                     time_consumed += time_calculated
-                    
+
                     if structure == "star":
                         slab_steps = steps_calculated
-                        slab_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, z_target)
+                        slab_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, fixed_indices)
                         slab_energy = energy_calculated
                         slab_time = time_calculated
                         slab_energy_change = energy_change
@@ -368,7 +369,7 @@ class AdsorptionCalculation:
                         slab_final = CONTCAR_calculated.copy()
                     else:
                         ads_step = steps_calculated
-                        ads_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, z_target)
+                        ads_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, fixed_indices)
                         ads_energy = energy_calculated
                         ads_time = time_calculated
                         ads_energy_change = energy_change
@@ -597,6 +598,7 @@ class AdsorptionCalculation:
             for structure in reaction_data["raw"]:
                 if "gas" not in str(structure) and structure != "star":
                     POSCAR_str = reaction_data["raw"][structure]["atoms"]
+                    fixed_indices = get_fixed_indices(POSCAR_str, self.config["rate"], z_target)
                     (
                         ads_energy,
                         steps_calculated,
@@ -609,15 +611,15 @@ class AdsorptionCalculation:
                         self.config["f_crit_relax"],
                         self.config["n_crit_relax"],
                         self.config["damping"],
-                        z_target,
+                        fixed_indices,
                         self.config["optimizer"],
                         f"{log_path}/{structure}_{i}.txt" if log_path else None,
                         f"{traj_path}/{structure}_{i}" if traj_path else None,
                     )
                     time_consumed += time_calculated
-                    
+
                     ads_step = steps_calculated
-                    ads_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, z_target)
+                    ads_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, fixed_indices)
                     ads_time = time_calculated
                     time_total_ads += time_calculated
                     steps_total_ads += steps_calculated

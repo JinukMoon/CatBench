@@ -38,7 +38,7 @@ def test_requires_benchmark():
 def test_init_applies_calculation_defaults():
     calc = AdsorptionCalculation([_dummy_calc()], mlip_name="x", benchmark="y")
     assert calc.config["optimizer"] == "LBFGS"
-    assert calc.config["rate"] == 0.5
+    assert calc.config["rate"] is None
     assert calc.config["f_crit_relax"] == 0.05
     assert calc.config["save_files"] is True
 

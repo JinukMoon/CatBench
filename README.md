@@ -116,9 +116,7 @@ cathub_preprocessing(
 
 #### Option C: User VASP Data
 
-> **Critical: Use `rate=None` when calling `AdsorptionCalculation` on your own VASP data.**
->
-> The default `rate=0.5` fixes the bottom 50% of atoms by z-coordinate and ignores your VASP Selective-Dynamics (T/F) flags. For CatHub/Zenodo data this is what the reference calculations did, but for your own data it silently overrides your physics and produces energies inconsistent with your DFT references. This is the single most common "why don't my MLIP and DFT match?" pitfall.
+> **Note:** Fixed-atom constraints are taken from the data automatically — your VASP Selective-Dynamics (T/F) flags are read into `FixAtoms` on the CONTCAR and applied during relaxation (CatHub data uses its stored `constraints` field the same way). The `rate` parameter defaults to `None` and only acts as an optional legacy override (fix the bottom `rate` fraction of atoms by z-coordinate), so no special setting is needed for your own VASP data.
 
 > **Warning:** `vasp_preprocessing` deletes every file except `CONTCAR` and `OSZICAR` to save disk space. Always run it on a copy of your original VASP output.
 
@@ -169,7 +167,7 @@ AdsorptionCalculation(
     [calc] * 3,                    # 3 reproducibility seeds
     mlip_name="YourMLIP",          # free-form label — folder name under result/, display name in plots
     benchmark="dataset_name",
-    # rate=None,                   # REQUIRED for user VASP data (Option C)
+    # rate=0.5,                    # optional legacy override; default None uses the data's real FixAtoms constraints
     # save_files=False,            # skip trajectory + log files to save disk space
 ).run()
 ```
@@ -399,7 +397,7 @@ Options are grouped into **Required**, **Commonly tuned**, and **Advanced** (col
 
 | Parameter | Description | Default |
 |---|---|---|
-| `rate` | Fraction of atoms to fix by z-coordinate. **Must be `None` for user VASP data** — see [Option C](#option-c-user-vasp-data). | 0.5 |
+| `rate` | If set (float), fix bottom `rate` fraction of atoms by z-coordinate (legacy). Default `None` = use the real FixAtoms constraints from the data (CatHub `constraints` field / VASP Selective-Dynamics). | None |
 | `save_files` | If False, skips trajectory + log files to save disk space. | True |
 | `f_crit_relax` | Force convergence criterion (eV/A). | 0.05 |
 | `n_crit_relax` | Max optimization steps per structure. | 999 |

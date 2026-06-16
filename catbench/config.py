@@ -20,7 +20,7 @@ CALCULATION_DEFAULTS = {
     # Optimization parameters
     "f_crit_relax": 0.05,
     "n_crit_relax": 999,
-    "rate": 0.5,
+    "rate": None,  # None = use the structure's stored FixAtoms constraints; a float = legacy z-coordinate fixing override
     "damping": 1.0,
 
     # Bond analysis

@@ -117,7 +117,7 @@ def energy_cal(
     f_crit_relax,
     n_crit_relax,
     damping,
-    z_target,
+    fixed_indices,
     optimizer,
     logfile=None,
     filename=None,
@@ -127,8 +127,8 @@ def energy_cal(
     atoms.calc = calculator
     tags = np.ones(len(atoms))
     atoms.set_tags(tags)
-    if z_target != None:
-        atoms.set_constraint(fixatom(atoms, z_target))
+    if fixed_indices is not None:
+        atoms.set_constraint(FixAtoms(indices=list(fixed_indices)))
     # Record initial energy before optimization
     initial_energy = atoms.get_potential_energy()
 
@@ -174,22 +174,38 @@ def energy_cal(
     return final_energy, opt.nsteps, atoms, elapsed_time, energy_change
 
 
-def fixatom(atoms, z_target):
-    """Fix atoms below specified z-coordinate."""
-    indices_to_fix = [atom.index for atom in atoms if atom.position[2] < z_target]
-    const = FixAtoms(indices=indices_to_fix)
-    return const
+def get_fixed_indices(atoms, rate, z_target=None):
+    """
+    Determine the indices of fixed atoms for a structure.
+
+    Args:
+        atoms: ASE Atoms object
+        rate: If not None, legacy z-coordinate fixing is used (fix atoms below z_target).
+              If None, the atoms' own stored FixAtoms constraints are used.
+        z_target: Z-coordinate threshold for the legacy rate path (only used when rate is not None)
+
+    Returns:
+        list[int]: Sorted, de-duplicated indices of fixed atoms (may be empty)
+    """
+    if rate is not None:
+        return [atom.index for atom in atoms if atom.position[2] < z_target]
+    indices = []
+    for c in atoms.constraints:
+        if isinstance(c, FixAtoms):
+            indices.extend(int(i) for i in c.get_indices())
+    return sorted(set(indices))
 
 
-def calc_displacement(atoms1, atoms2, z_target=None):
+def calc_displacement(atoms1, atoms2, fixed_indices=None):
     """
     Calculate displacement statistics between two structures.
-    
+
     Args:
         atoms1: Initial atomic structure
-        atoms2: Final atomic structure  
-        z_target: Z-coordinate threshold for atom fixing (if None, all atoms are considered mobile)
-        
+        atoms2: Final atomic structure
+        fixed_indices: Indices of fixed atoms. Mobile atoms are the complement of this set.
+                       If None, all atoms are considered mobile.
+
     Returns:
         dict: Dictionary containing displacement statistics:
             - max_disp: Maximum displacement of any atom
@@ -198,18 +214,20 @@ def calc_displacement(atoms1, atoms2, z_target=None):
     """
     positions1 = atoms1.get_positions()
     positions2 = atoms2.get_positions()
-    
+
     # Calculate displacement for each atom
     displacement_magnitudes = np.linalg.norm(positions2 - positions1, axis=1)
-    
+
     # Maximum displacement of any atom
     max_disp = np.max(displacement_magnitudes)
-    
-    # If z_target is provided, calculate MAE and RMSD for mobile (free) atoms only
-    if z_target is not None:
-        # Identify mobile (non-fixed) atoms - use original positions for z comparison
-        mobile_mask = atoms1.positions[:, 2] >= z_target
-        
+
+    # If fixed_indices is provided, calculate MAE and RMSD for mobile (free) atoms only
+    if fixed_indices is not None:
+        # Mobile (non-fixed) atoms are the complement of fixed_indices
+        mobile_mask = np.ones(len(atoms1), dtype=bool)
+        if len(fixed_indices) > 0:
+            mobile_mask[list(fixed_indices)] = False
+
         if np.sum(mobile_mask) > 0:
             mobile_displacements = displacement_magnitudes[mobile_mask]
             mae_mobile = np.mean(mobile_displacements)  # Mean Absolute Error
@@ -218,7 +236,7 @@ def calc_displacement(atoms1, atoms2, z_target=None):
             mae_mobile = 0.0
             rmsd_mobile = 0.0
     else:
-        # If no z_target, use all atoms
+        # If no fixed_indices, use all atoms
         mae_mobile = np.mean(displacement_magnitudes)
         rmsd_mobile = np.sqrt(np.mean(displacement_magnitudes**2))
     
