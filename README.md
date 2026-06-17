@@ -114,11 +114,11 @@ cathub_preprocessing(
 )
 ```
 
-Downloads are deterministic (stable `order: "id"` pagination + id-based dedup) and **fixed-atom constraints are handled automatically**: CatHub's deposited `constraints` are kept as-is, and for datasets where CatHub omits them the fixed set is **inferred from geometry** (clean slab vs adslab — atoms that do not move were held fixed) and injected as `FixAtoms`. A genuinely unconstrained slab is left free. So every preprocessed dataset is self-describing and runs correctly without any `rate` setting.
+Downloads are deterministic (stable `order: "id"` pagination + id-based dedup) and **fixed-atom constraints are handled automatically**: CatHub's deposited `constraints` are kept as-is, and for datasets where CatHub omits them the fixed set is **inferred from geometry** (clean slab vs adslab — atoms that do not move were held fixed) and injected as `FixAtoms`. A genuinely unconstrained slab is left free. So every preprocessed dataset is self-describing and runs correctly out of the box.
 
 #### Option C: User VASP Data
 
-> **Note:** Fixed-atom constraints are taken from the data automatically — your VASP Selective-Dynamics (T/F) flags are read into `FixAtoms` on the CONTCAR and applied during relaxation (CatHub data keeps its deposited `constraints`, or has them inferred from geometry when absent). No `rate` setting is needed for your own VASP data. (`rate` survives only as a deep-legacy override that ignores the real constraints and instead fixes the bottom `rate` fraction of atoms by z-coordinate; see the config table.)
+> **Note:** Fixed-atom constraints are taken from the data automatically — your VASP Selective-Dynamics (T/F) flags are read into `FixAtoms` on the CONTCAR and applied during relaxation.
 
 > **Warning:** `vasp_preprocessing` deletes every file except `CONTCAR` and `OSZICAR` to save disk space. Always run it on a copy of your original VASP output.
 
@@ -169,7 +169,6 @@ AdsorptionCalculation(
     [calc] * 3,                    # 3 reproducibility seeds
     mlip_name="YourMLIP",          # free-form label — folder name under result/, display name in plots
     benchmark="dataset_name",
-    # rate=0.5,                    # deep-legacy override only; default None uses the data's real/inferred FixAtoms
     # save_files=False,            # skip trajectory + log files to save disk space
 ).run()
 ```
@@ -399,7 +398,7 @@ Options are grouped into **Required**, **Commonly tuned**, and **Advanced** (col
 
 | Parameter | Description | Default |
 |---|---|---|
-| `rate` | Default `None` = use the data's real `FixAtoms` constraints (CatHub deposited `constraints`, geometry-inferred when absent, or VASP Selective-Dynamics). This is the normal path — no setting needed. A float is a deep-legacy override that **ignores** the real constraints and instead fixes the bottom `rate` fraction of atoms by z-coordinate (kept only to reproduce pre-1.1.0 numbers). | None |
+| `rate` | Leave as `None` (default) to use the structure's own `FixAtoms`. Set a float (e.g. `0.5`) only to force-fix the bottom `rate` fraction of atoms by z-coordinate, overriding the stored constraints. | None |
 | `save_files` | If False, skips trajectory + log files to save disk space. | True |
 | `f_crit_relax` | Force convergence criterion (eV/A). | 0.05 |
 | `n_crit_relax` | Max optimization steps per structure. | 999 |
