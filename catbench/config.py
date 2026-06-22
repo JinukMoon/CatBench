@@ -20,8 +20,8 @@ CALCULATION_DEFAULTS = {
     # Optimization parameters
     "f_crit_relax": 0.05,
     "n_crit_relax": 999,
-    "rate": None,  # None = use the structure's stored FixAtoms constraints; a float = legacy z-coordinate fixing override
     "damping": 1.0,
+    "slab_cache": True,  # reuse a relaxed clean-slab result across frame-equivalent slabs (1.1.1)
 
     # Bond analysis
     "chemical_bond_cutoff": 6.0,  # Chemical bond cutoff in Å for max_bond_change calculation

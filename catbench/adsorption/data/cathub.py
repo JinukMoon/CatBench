@@ -645,7 +645,7 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
                         data_total[tag]["constraint_source"] = "undetermined_kept"
                         logger.warning(
                             f"{tag}: missing FixAtoms and inference unavailable; "
-                            f"kept without constraint (run with explicit rate=).")
+                            f"kept without constraint (will relax fully unconstrained).")
 
                 # Log successful processing
                 logger.debug(f"Successfully processed reaction: {tag}")

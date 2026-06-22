@@ -398,7 +398,7 @@ Options are grouped into **Required**, **Commonly tuned**, and **Advanced** (col
 
 | Parameter | Description | Default |
 |---|---|---|
-| `rate` | Leave as `None` (default) to use the structure's own `FixAtoms`. Set a float (e.g. `0.5`) only to force-fix the bottom `rate` fraction of atoms by z-coordinate, overriding the stored constraints. | None |
+| `slab_cache` | Relax each unique clean slab once and reuse the result for every frame-equivalent slab (identical energy; pure speedup). Set False to disable. | True |
 | `save_files` | If False, skips trajectory + log files to save disk space. | True |
 | `f_crit_relax` | Force convergence criterion (eV/A). | 0.05 |
 | `n_crit_relax` | Max optimization steps per structure. | 999 |

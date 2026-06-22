@@ -30,30 +30,23 @@ def _sample_atoms(n=4):
 
 
 # --------------------------------------------------------------------------- #
-# get_fixed_indices / rate semantics
+# get_fixed_indices semantics (1.1.1: data-defined FixAtoms only; rate removed)
 # --------------------------------------------------------------------------- #
-def test_get_fixed_indices_rate_none_uses_own_fixatoms_sorted():
+def test_get_fixed_indices_uses_own_fixatoms_sorted():
     atoms = _sample_atoms(4)
     atoms.set_constraint(FixAtoms(indices=[2, 0]))  # deliberately unsorted
-    assert get_fixed_indices(atoms, None) == [0, 2]
+    assert get_fixed_indices(atoms) == [0, 2]
 
 
-def test_get_fixed_indices_rate_float_uses_legacy_z():
-    atoms = _sample_atoms(4)  # z positions 0,1,2,3
-    atoms.set_constraint(FixAtoms(indices=[3]))  # must be ignored by legacy path
-    # Fix atoms with z < z_target=1.5 -> atoms 0 (z=0) and 1 (z=1).
-    assert get_fixed_indices(atoms, rate=0.5, z_target=1.5) == [0, 1]
-
-
-def test_get_fixed_indices_no_constraints_rate_none_returns_empty():
+def test_get_fixed_indices_no_constraints_returns_empty():
     atoms = _sample_atoms(2)
-    assert get_fixed_indices(atoms, None) == []
+    assert get_fixed_indices(atoms) == []
 
 
 def test_get_fixed_indices_dedups_multiple_constraints():
     atoms = _sample_atoms(4)
     atoms.set_constraint([FixAtoms(indices=[0, 1]), FixAtoms(indices=[1, 3])])
-    assert get_fixed_indices(atoms, None) == [0, 1, 3]
+    assert get_fixed_indices(atoms) == [0, 1, 3]
 
 
 # --------------------------------------------------------------------------- #
@@ -192,18 +185,14 @@ def test_fixatoms_survives_catbench_json_roundtrip(tmp_path):
 # --------------------------------------------------------------------------- #
 # constraint_mode + version stamp (C4)
 # --------------------------------------------------------------------------- #
-def test_get_calculation_settings_rate_none_is_fixatoms():
-    settings = get_calculation_settings({"rate": None})
+def test_get_calculation_settings_constraint_mode_is_fixatoms():
+    # 1.1.1: fixing is always data-defined; constraint_mode is always "fixatoms".
+    settings = get_calculation_settings({})
     assert settings["constraint_mode"] == "fixatoms"
 
 
-def test_get_calculation_settings_float_rate_is_legacy_z():
-    settings = get_calculation_settings({"rate": 0.5})
-    assert settings["constraint_mode"] == "legacy_z"
-
-
 def test_get_calculation_settings_includes_version_stamp():
-    settings = get_calculation_settings({"rate": None})
+    settings = get_calculation_settings({})
     assert "catbench_version" in settings
     assert isinstance(settings["catbench_version"], str)
     assert settings["catbench_version"]

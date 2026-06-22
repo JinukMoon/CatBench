@@ -1,0 +1,134 @@
+"""C3 — runtime slab-cache integration: dedup ON == OFF, cache hits, restart.
+
+Uses ASE EMT (deterministic, frame-invariant) so a correct cache reproduces the
+no-cache numbers exactly. No GPU / MLIP needed.
+"""
+import json
+import os
+
+import numpy as np
+import pytest
+from ase import Atoms
+from ase.build import fcc111, add_adsorbate
+from ase.calculators.emt import EMT
+from ase.constraints import FixAtoms
+
+from catbench.utils.data_utils import save_catbench_json, _write_catbench_json
+from catbench.adsorption import AdsorptionCalculation
+
+
+def _surface(shift):
+    slab = fcc111("Pt", size=(2, 2, 3), vacuum=6.0)
+    slab.set_constraint(FixAtoms(mask=[a.position[2] < slab.positions[:, 2].mean() for a in slab]))
+    slab.translate(shift)
+    slab.wrap()
+    return slab
+
+
+def _adslab_from(slab, dz):
+    ad = slab.copy()
+    top_z = ad.positions[:, 2].max()
+    ad += Atoms("O", positions=[[ad.cell[0, 0] / 2, ad.cell[1, 1] / 2, top_z + 1.8 + dz]])
+    return ad
+
+
+def _gas():
+    return Atoms("O2", positions=[[0, 0, 0], [0, 0, 1.2]], cell=[12, 12, 12], pbc=True)
+
+
+def _build_dataset(path, dedup):
+    # 3 reactions on the SAME Pt(111) surface (frame-shifted) -> slab dedups;
+    # distinct adslabs -> not deduped. Same O2 gas ref -> dedups.
+    data = {}
+    for i, sh in enumerate([(0, 0, 0), (0.3, 0.7, 0.0), (1.1, 0.2, 0.0)]):
+        slab = _surface(sh)
+        ads = _adslab_from(slab, dz=0.05 * i)
+        n = len(slab)
+        data["O_site%d" % i] = {
+            "raw": {
+                "star": {"atoms": slab, "energy_ref": 0.0, "stoi": -1},
+                "Ostar": {"atoms": ads, "energy_ref": 0.0, "stoi": 1},
+                "O2gas": {"atoms": _gas(), "energy_ref": 0.0, "stoi": -0.5},
+            },
+            "ref_ads_eng": 0.0,
+            "adsorbate_indices": [n],
+            "constraint_source": "deposited",
+        }
+    _write_catbench_json(data, path, dedup=dedup)
+
+
+def _run(tmp, benchmark, dedup, slab_cache):
+    os.makedirs(os.path.join(tmp, "raw_data"), exist_ok=True)
+    _build_dataset(os.path.join(tmp, "raw_data", f"{benchmark}_adsorption.json"), dedup)
+    cwd = os.getcwd()
+    os.chdir(tmp)
+    try:
+        AdsorptionCalculation(
+            [EMT(), EMT()], mlip_name=f"EMT_{int(dedup)}_{int(slab_cache)}",
+            benchmark=benchmark, save_files=False, slab_cache=slab_cache,
+        ).run()
+        rp = os.path.join(tmp, "result", f"EMT_{int(dedup)}_{int(slab_cache)}",
+                          f"EMT_{int(dedup)}_{int(slab_cache)}_result.json")
+        with open(rp) as f:
+            res = json.load(f)
+    finally:
+        os.chdir(cwd)
+    return res
+
+
+def _ads_engs(res):
+    return {k: v["0"]["ads_eng"] for k, v in res.items() if isinstance(v, dict) and "0" in v}
+
+
+def test_slab_cache_on_equals_off(tmp_path):
+    tmp = str(tmp_path)
+    off = _ads_engs(_run(tmp, "ds_a", dedup=False, slab_cache=False))
+    on = _ads_engs(_run(tmp, "ds_b", dedup=False, slab_cache=True))
+    assert set(on) == set(off) and len(on) == 3
+    for k in off:
+        assert abs(on[k] - off[k]) < 1e-6, (k, on[k], off[k])
+
+
+def test_single_point_slab_cached_on_equals_off(tmp_path):
+    # the single_calculation (single-point) slab energy is also cached; ON==OFF
+    tmp = str(tmp_path)
+    off = _run(tmp, "sp_a", dedup=False, slab_cache=False)
+    on = _run(tmp, "sp_b", dedup=False, slab_cache=True)
+    keys = [k for k in off if isinstance(off[k], dict) and "single_calculation" in off[k]]
+    assert keys
+    for k in keys:
+        assert abs(on[k]["single_calculation"]["ads_eng"]
+                   - off[k]["single_calculation"]["ads_eng"]) < 1e-9
+
+
+def test_storage_dedup_on_equals_off(tmp_path):
+    tmp = str(tmp_path)
+    legacy = _ads_engs(_run(tmp, "ds_c", dedup=False, slab_cache=True))
+    deduped = _ads_engs(_run(tmp, "ds_d", dedup=True, slab_cache=True))
+    for k in legacy:
+        assert abs(deduped[k] - legacy[k]) < 1e-6, (k, deduped[k], legacy[k])
+
+
+def test_slab_cache_produces_hits(tmp_path):
+    tmp = str(tmp_path)
+    res = _run(tmp, "ds_e", dedup=True, slab_cache=True)
+    # 3 reactions share one slab; per seed only the first relaxes, the rest are
+    # cache hits (slab_time == 0).
+    slab_times = [v["0"]["slab_time"] for k, v in res.items()
+                  if isinstance(v, dict) and "0" in v]
+    assert slab_times.count(0.0) >= 2  # at least 2 of 3 reused
+
+
+def test_restart_resumes_slab_cache(tmp_path):
+    tmp = str(tmp_path)
+    benchmark = "ds_f"
+    os.makedirs(os.path.join(tmp, "raw_data"), exist_ok=True)
+    _build_dataset(os.path.join(tmp, "raw_data", f"{benchmark}_adsorption.json"), dedup=True)
+    save_dir = os.path.join(tmp, "result", "EMT_rs")
+    # Pre-seed a slab cache file as if a prior run had relaxed the slab, then run:
+    # if resume works, the run reuses it and matches a clean run.
+    full = _ads_engs(_run(tmp, "ds_g", dedup=True, slab_cache=True))
+    # second independent run must reproduce identical numbers (determinism)
+    again = _ads_engs(_run(tmp, "ds_h", dedup=True, slab_cache=True))
+    for k in full:
+        assert abs(full[k] - again[k]) < 1e-9

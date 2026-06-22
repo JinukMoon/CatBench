@@ -177,17 +177,17 @@ def save_anomaly_detection_results(calculating_path: str, mlip_name: str,
 
 def get_calculation_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     """Extract calculation settings for saving to result file."""
-    settings_keys = ["optimizer", "f_crit_relax", "n_crit_relax", "rate", "damping", "save_step", "chemical_bond_cutoff"]
+    settings_keys = ["optimizer", "f_crit_relax", "n_crit_relax", "damping", "save_step", "chemical_bond_cutoff"]
     settings = {k: config.get(k) for k in settings_keys if k in config}
 
-    # Stamp version + constraint mode so old (legacy z-coordinate fixing) and
-    # new (FixAtoms-based) result files are distinguishable after the fact.
+    # Stamp version + constraint mode. Fixing is always data-defined (stored
+    # FixAtoms); the legacy z-coordinate `rate` override was removed in 1.1.1.
     try:
         from importlib.metadata import version
         catbench_version = version("catbench")
     except Exception:
-        catbench_version = "1.1.0"
+        catbench_version = "1.1.1"
     settings["catbench_version"] = catbench_version
-    settings["constraint_mode"] = "legacy_z" if config.get("rate") is not None else "fixatoms"
+    settings["constraint_mode"] = "fixatoms"
 
     return settings

@@ -64,15 +64,84 @@ def detect_adsorbate_indices(slab_atoms, adslab_atoms) -> List[int]:
     return adsorbate_indices
 
 
+def _iter_structure_dicts(json_data):
+    """Yield every leaf dict that holds a structure (has 'atoms_json' or 'ref'),
+    across all CatBench data layouts (raw / star,bulk,... / references). Skips the
+    top-level '_structures' map."""
+    for rk, rv in json_data.items():
+        if rk == "_structures" or not isinstance(rv, dict):
+            continue
+        if "raw" in rv and isinstance(rv["raw"], dict):
+            for sv in rv["raw"].values():
+                if isinstance(sv, dict):
+                    yield sv
+        for key in ("surface", "star", "bulk", "target"):
+            if key in rv and isinstance(rv[key], dict):
+                yield rv[key]
+        if "references" in rv and isinstance(rv["references"], dict):
+            for sv in rv["references"].values():
+                if isinstance(sv, dict):
+                    yield sv
+
+
+def _dedup_structures_inplace(json_data):
+    """Intern frame-equivalent structures into a top-level '_structures' map and
+    replace each system's verbatim 'atoms_json' with a 'ref' pointer.
+
+    Only structures that are verified ``structures_equivalent`` (and share a
+    geometry+fix ``dedup_key``) collapse to one stored copy, so a resolved
+    structure is physically identical (=> identical relaxed energy) to the one it
+    replaced. Frame/order differences are absorbed; genuinely different structures
+    (e.g. distinct relaxation minima) are kept separate.
+    """
+    import hashlib
+    from collections import defaultdict
+    from catbench.utils.structure_dedup import reuse_key, structures_equivalent
+
+    structures = {}                 # hash -> atoms_json (canonical copy)
+    reps = defaultdict(list)        # reuse_key -> [(atoms, hash)]
+    for sv in _iter_structure_dicts(json_data):
+        aj = sv.get("atoms_json")
+        if aj is None:
+            continue
+        atoms = read(io.StringIO(aj), format="json")
+        k = reuse_key(atoms, sv.get("energy_ref"))
+        ref = None
+        for rep_atoms, rep_hash in reps[k]:
+            if structures_equivalent(atoms, rep_atoms):
+                ref = rep_hash
+                break
+        if ref is None:
+            # Hash the FULL reuse_key (+ bucket index) so no two distinct keys
+            # can collide on a truncated prefix and silently overwrite a structure.
+            ref = hashlib.md5(("%s_%d" % (k, len(reps[k]))).encode()).hexdigest()
+            reps[k].append((atoms, ref))
+            structures[ref] = aj
+        sv["ref"] = ref
+        del sv["atoms_json"]
+    if structures:
+        json_data["_structures"] = structures
+
+
 def save_catbench_json(data_dict: Dict[str, Any], filepath: str) -> None:
     """
-    Save CatBench data dictionary to JSON format.
-    Converts ASE Atoms objects to JSON-serializable format.
-    
+    Save CatBench data to JSON. ASE Atoms objects are serialized, and
+    frame-equivalent structures (e.g. a clean slab or gas reference shared across
+    many reactions) are interned into a top-level '_structures' map referenced by
+    per-system 'ref' pointers -- smaller on disk and losslessly restored by
+    ``load_catbench_json``.
+
     Args:
         data_dict: Dictionary containing reaction data with ASE Atoms objects
         filepath: Path to save JSON file
     """
+    _write_catbench_json(data_dict, filepath, dedup=True)
+
+
+def _write_catbench_json(data_dict: Dict[str, Any], filepath: str, dedup: bool = True) -> None:
+    """Internal writer. ``dedup=False`` writes the verbatim ``atoms_json`` layout
+    instead of interned refs -- used only by tests that assert that deduplication
+    does not change anything (dedup-on == dedup-off)."""
     # Deep copy to avoid modifying original
     import copy
     json_data = copy.deepcopy(data_dict)
@@ -120,10 +189,15 @@ def save_catbench_json(data_dict: Dict[str, Any], filepath: str) -> None:
                     json_data[reaction_key]["references"][ref_key]["atoms_json"] = atoms_json_str
                     del json_data[reaction_key]["references"][ref_key]["atoms"]
     
+    # Deduplicate frame-equivalent structures into a top-level "_structures" map
+    # referenced by per-system "ref" pointers (1.1.1; losslessly resolved on load).
+    if dedup:
+        _dedup_structures_inplace(json_data)
+
     # Save to JSON file
     with open(filepath, 'w') as f:
         json.dump(json_data, f, indent=2)
-    
+
     print(f"Data saved to {filepath}")
 
 
@@ -181,7 +255,25 @@ def load_catbench_json(filepath: str) -> Dict[str, Any]:
     # Load JSON data
     with open(filepath, 'r') as f:
         json_data = json.load(f)
-    
+
+    # Resolve deduplicated structures (1.1.1): rehydrate each "ref" pointer from
+    # the top-level "_structures" map back to verbatim "atoms_json", then remove
+    # the map so the reaction loop below is unchanged. Legacy files (direct
+    # "atoms_json", no "_structures") are untouched -> full backward compatibility.
+    structures = json_data.pop("_structures", None)
+    if structures:
+        for sv in _iter_structure_dicts(json_data):
+            ref = sv.get("ref")
+            if ref is not None:
+                aj = structures.get(ref)
+                if aj is None:
+                    raise ValueError(
+                        f"Dangling structure ref {ref!r} in {filepath} "
+                        f"(missing from '_structures' map; file may be truncated/corrupt)."
+                    )
+                sv["atoms_json"] = aj
+                del sv["ref"]
+
     # Convert JSON strings back to Atoms objects
     for reaction_key in json_data:
         # Handle adsorption data format (with "raw")

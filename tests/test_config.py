@@ -18,7 +18,6 @@ REQUIRED_CALCULATION_KEYS = (
     "save_files",
     "f_crit_relax",
     "n_crit_relax",
-    "rate",
     "damping",
     "chemical_bond_cutoff",
 )

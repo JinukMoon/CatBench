@@ -189,21 +189,17 @@ def energy_cal(
     return final_energy, opt.nsteps, atoms, elapsed_time, energy_change
 
 
-def get_fixed_indices(atoms, rate, z_target=None):
+def get_fixed_indices(atoms):
     """
-    Determine the indices of fixed atoms for a structure.
+    Determine the indices of fixed atoms for a structure from its stored
+    FixAtoms constraints (data-defined fixing only).
 
     Args:
         atoms: ASE Atoms object
-        rate: If not None, legacy z-coordinate fixing is used (fix atoms below z_target).
-              If None, the atoms' own stored FixAtoms constraints are used.
-        z_target: Z-coordinate threshold for the legacy rate path (only used when rate is not None)
 
     Returns:
         list[int]: Sorted, de-duplicated indices of fixed atoms (may be empty)
     """
-    if rate is not None:
-        return [atom.index for atom in atoms if atom.position[2] < z_target]
     indices = []
     for c in atoms.constraints:
         if isinstance(c, FixAtoms):
@@ -285,14 +281,3 @@ def find_median_index(arr):
     order = np.argsort(a, kind="stable")   # NaN sorts to the end deterministically
     median_index = int(order[(a.size - 1) // 2])
     return median_index, float(a[median_index])
-
-
-def fix_z(atoms, rate_fix):
-    """Calculate z-coordinate for fixing atoms based on rate."""
-    if rate_fix is not None:
-        z_max = max(atoms.positions[:, 2])
-        z_min = min(atoms.positions[:, 2])
-        z_target = z_min + rate_fix * (z_max - z_min)
-        return z_target
-    else:
-        return None
