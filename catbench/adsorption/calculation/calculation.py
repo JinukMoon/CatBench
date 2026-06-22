@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import traceback
+import warnings
 
 import numpy as np
 from ase.geometry import find_mic
@@ -121,10 +122,30 @@ class AdsorptionCalculation:
         
     def _set_default_params(self):
         """Set configuration parameters with appropriate defaults."""
+        # Warn (don't silently ignore) on knobs removed in 1.1.1: fixing is now
+        # purely the structure's stored FixAtoms, so an explicit rate/z_target/
+        # fix_z would change a user's intended behavior without notice.
+        for legacy in ("rate", "z_target", "fix_z"):
+            if legacy in self.config:
+                warnings.warn(
+                    f"'{legacy}' was removed in CatBench 1.1.1 and is ignored; "
+                    "atom fixing now uses the structure's stored FixAtoms only.",
+                    stacklevel=2,
+                )
         # Apply configuration defaults
         for key, default_value in CALCULATION_DEFAULTS.items():
             if key not in self.config:
                 self.config[key] = get_default(key, CALCULATION_DEFAULTS)
+
+    def _relax_sig(self):
+        """Signature of the settings that determine a relaxation result. The slab
+        cache is only valid while these are unchanged; a change invalidates it."""
+        return [
+            str(self.config.get("optimizer")),
+            self.config.get("f_crit_relax"),
+            self.config.get("n_crit_relax"),
+            self.config.get("damping"),
+        ]
     
     def run(self):
         """
@@ -182,6 +203,14 @@ class AdsorptionCalculation:
                 with open(slab_path) as f:
                     slab_energies = json.load(f)
             except Exception:
+                slab_energies = {}
+            # Cached relaxations are valid only for the settings that produced them.
+            # If the run's relaxation settings changed, discard the cache so
+            # structures are re-relaxed instead of silently reusing stale results.
+            if slab_energies.get("__relax_config__") != self._relax_sig():
+                if slab_energies:
+                    print("Relaxation settings changed since the slab cache was "
+                          "written; discarding cache and recomputing.")
                 slab_energies = {}
         return final_result, gas_energies, gas_energies_single, slab_energies
     
@@ -346,6 +375,15 @@ class AdsorptionCalculation:
         steps_total_slab = 0
         steps_total_ads = 0
         
+        # Precompute the seed-independent reuse_key per non-gas structure ONCE.
+        # The geometry fingerprint is O(n_atoms^2) and identical across seeds, so
+        # computing it inside the seed loop would repeat it (n_seeds - 1)x.
+        reuse_keys = {
+            s: reuse_key(reaction_data["raw"][s]["atoms"],
+                         reaction_data["raw"][s].get("energy_ref"))
+            for s in reaction_data["raw"] if "gas" not in str(s)
+        }
+
         # Run calculations for each calculator
         for i in range(len(self.calculators)):
             ads_energy_calc = 0
@@ -368,8 +406,7 @@ class AdsorptionCalculation:
                     # are frame-invariant -> identical result, pure speedup).
                     POSCAR_str = reaction_data["raw"][structure]["atoms"]
                     fixed_indices = get_fixed_indices(POSCAR_str)
-                    slab_eref = reaction_data["raw"][structure].get("energy_ref")
-                    slab_key = f"{reuse_key(POSCAR_str, slab_eref)}_{i}th"
+                    slab_key = f"{reuse_keys[structure]}_{i}th"
                     cached = slab_energies.get(slab_key) if self.config.get("slab_cache", True) else None
                     if cached is not None:
                         slab_energy = cached["slab_tot_eng"]
@@ -430,8 +467,7 @@ class AdsorptionCalculation:
                     # identical for an identical adslab -> same result, pure speedup.
                     POSCAR_str = reaction_data["raw"][structure]["atoms"]
                     fixed_indices = get_fixed_indices(POSCAR_str)
-                    ads_eref = reaction_data["raw"][structure].get("energy_ref")
-                    adslab_cache_key = f"ads:{reuse_key(POSCAR_str, ads_eref)}|{adsorbate_indices}_{i}th"
+                    adslab_cache_key = f"ads:{reuse_keys[structure]}|{adsorbate_indices}_{i}th"
                     cached = slab_energies.get(adslab_cache_key) if self.config.get("slab_cache", True) else None
                     if cached is not None:
                         ads_energy = cached["adslab_tot_eng"]
@@ -796,8 +832,16 @@ class AdsorptionCalculation:
         )
         # Persist the slab-relaxation cache as a restart-safe sibling file (1.1.1),
         # mirroring the gas-cache persistence discipline.
-        with open(os.path.join(save_directory, f"{self.mlip_name}_slab_energies.json"), "w") as f:
+        # Stamp the relaxation settings so a later run with different settings
+        # invalidates the cache instead of reusing stale relaxations.
+        slab_energies["__relax_config__"] = self._relax_sig()
+        # Atomic write: a kill mid-write (e.g. SLURM walltime) must not truncate
+        # the cache and lose restart-safety. Write to a temp file then rename.
+        slab_cache_path = os.path.join(save_directory, f"{self.mlip_name}_slab_energies.json")
+        tmp_path = slab_cache_path + ".tmp"
+        with open(tmp_path, "w") as f:
             json.dump(slab_energies, f, cls=NumpyEncoder)
+        os.replace(tmp_path, slab_cache_path)
 
     def _save_results_oc20(self, save_directory, final_result, failures=None):
         """Save results for OC20 mode."""
@@ -863,6 +907,11 @@ class AdsorptionCalculation:
         Returns:
             float: Maximum substrate displacement in Angstroms
         """
+        # NOTE: this metric depends ONLY on the adslab (initial vs final) and
+        # adsorbate_indices -- slab_initial/slab_final are intentionally unused.
+        # The adslab cache relies on this: a cached substrate_displacement is
+        # reused for any reaction with an identical adslab regardless of its clean
+        # slab. Do not start using the slab args here without revisiting that cache.
         # Substrate atoms are all non-adsorbate atoms, indexed in the adslab
         # space (not the slab space) so they are correct even when adsorbate
         # indices are not strictly trailing.

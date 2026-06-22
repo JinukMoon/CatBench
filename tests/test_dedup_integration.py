@@ -201,3 +201,42 @@ def test_adslab_cache_on_equals_off_incl_anomaly_metrics(tmp_path):
                     "substrate_displacement", "adslab_max_disp",
                     "adslab_pos_mae", "adslab_pos_rmsd", "adslab_energy_change"):
             assert abs(on[k]["0"][fld] - off[k]["0"][fld]) < 1e-9, (k, fld)
+
+
+def test_slab_cache_invalidated_when_relax_settings_change(tmp_path):
+    # A cache written under one set of relaxation settings must NOT be reused when
+    # the run's settings change (else stale, loosely-converged numbers reappear).
+    tmp = str(tmp_path)
+    os.makedirs(os.path.join(tmp, "raw_data"), exist_ok=True)
+    _build_dataset(os.path.join(tmp, "raw_data", "cfg_adsorption.json"), dedup=True)
+    cwd = os.getcwd()
+    os.chdir(tmp)
+    try:
+        AdsorptionCalculation([EMT(), EMT()], mlip_name="EMT_cfg", benchmark="cfg",
+                              save_files=False, slab_cache=True, n_crit_relax=50).run()
+        save_dir = os.path.join(tmp, "result", "EMT_cfg")
+        cache = json.load(open(os.path.join(save_dir, "EMT_cfg_slab_energies.json")))
+        assert "__relax_config__" in cache
+        assert sum(1 for k in cache if k != "__relax_config__") >= 1  # real entries exist
+
+        # SAME settings -> cache kept
+        same = AdsorptionCalculation([EMT(), EMT()], mlip_name="EMT_cfg", benchmark="cfg",
+                                     save_files=False, slab_cache=True, n_crit_relax=50)
+        _, _, _, se_same = same._load_existing_results(save_dir)
+        assert len(se_same) > 1
+
+        # DIFFERENT n_crit_relax -> cache discarded
+        diff = AdsorptionCalculation([EMT(), EMT()], mlip_name="EMT_cfg", benchmark="cfg",
+                                     save_files=False, slab_cache=True, n_crit_relax=999)
+        _, _, _, se_diff = diff._load_existing_results(save_dir)
+        assert se_diff == {}
+    finally:
+        os.chdir(cwd)
+
+
+def test_removed_rate_knob_warns():
+    import warnings as _w
+    with _w.catch_warnings(record=True) as rec:
+        _w.simplefilter("always")
+        AdsorptionCalculation([EMT()], mlip_name="warn", benchmark="b", rate=0.5)
+    assert any("rate" in str(r.message) for r in rec)

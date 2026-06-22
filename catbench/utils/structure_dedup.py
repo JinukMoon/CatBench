@@ -80,6 +80,8 @@ def structures_equivalent(a, b, tol=1e-3):
     """
     if len(a) != len(b):
         return False
+    if len(a) == 0:
+        return True  # two empty structures are trivially equivalent (no sa[0] anchor)
     sa = np.asarray(a.get_chemical_symbols())
     sb = np.asarray(b.get_chemical_symbols())
     if sorted(sa.tolist()) != sorted(sb.tolist()):
@@ -134,7 +136,10 @@ def reuse_key(atoms, energy_ref, tol=0.01):
     only.
     """
     geo = dedup_key(atoms, tol=tol)
-    if energy_ref is None:
+    # A missing or non-finite (NaN/inf) energy can't serve as a cross-check, so
+    # fall back to geometry+fix only and mark the key explicitly (never emit a
+    # "nan|" prefix that silently disables the energy check).
+    if energy_ref is None or not np.isfinite(float(energy_ref)):
         return "noE|" + geo
     return ("%.6f|" % round(float(energy_ref), 6)) + geo
 
