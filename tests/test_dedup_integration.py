@@ -132,3 +132,72 @@ def test_restart_resumes_slab_cache(tmp_path):
     again = _ads_engs(_run(tmp, "ds_h", dedup=True, slab_cache=True))
     for k in full:
         assert abs(full[k] - again[k]) < 1e-9
+
+
+# --- adslab reuse (identical adslab shared across reactions) ---
+
+def _build_adslab_dup_dataset(path, dedup):
+    # 3 reactions whose adslab (slab + O) is the SAME structure, frame-shifted ->
+    # identical reuse_key -> the adslab relaxation should be reused (cache hit),
+    # and every derived metric (energy, bond change, substrate displacement) must
+    # be identical to a no-cache run.
+    base_slab = _surface((0, 0, 0))
+    base_ads = _adslab_from(base_slab, dz=0.0)
+    n = len(base_slab)
+    data = {}
+    for i, sh in enumerate([(0, 0, 0), (0.3, 0.7, 0.0), (1.1, 0.2, 0.0)]):
+        slab = _surface(sh)
+        ads = base_ads.copy()
+        ads.translate(sh)
+        ads.wrap()
+        data["O_dup%d" % i] = {
+            "raw": {
+                "star": {"atoms": slab, "energy_ref": 0.0, "stoi": -1},
+                "Ostar": {"atoms": ads, "energy_ref": 0.0, "stoi": 1},
+                "O2gas": {"atoms": _gas(), "energy_ref": 0.0, "stoi": -0.5},
+            },
+            "ref_ads_eng": 0.0,
+            "adsorbate_indices": [n],
+            "constraint_source": "deposited",
+        }
+    _write_catbench_json(data, path, dedup=dedup)
+
+
+def _run_builder(tmp, benchmark, builder, dedup, slab_cache):
+    os.makedirs(os.path.join(tmp, "raw_data"), exist_ok=True)
+    builder(os.path.join(tmp, "raw_data", f"{benchmark}_adsorption.json"), dedup)
+    mlip = f"EMT_ad_{int(dedup)}_{int(slab_cache)}"
+    cwd = os.getcwd()
+    os.chdir(tmp)
+    try:
+        AdsorptionCalculation(
+            [EMT(), EMT()], mlip_name=mlip, benchmark=benchmark,
+            save_files=False, slab_cache=slab_cache,
+        ).run()
+        with open(os.path.join(tmp, "result", mlip, f"{mlip}_result.json")) as f:
+            res = json.load(f)
+    finally:
+        os.chdir(cwd)
+    return res
+
+
+def test_adslab_cache_produces_hits(tmp_path):
+    tmp = str(tmp_path)
+    res = _run_builder(tmp, "ad_a", _build_adslab_dup_dataset, dedup=True, slab_cache=True)
+    adslab_times = [v["0"]["adslab_time"] for k, v in res.items()
+                    if isinstance(v, dict) and "0" in v]
+    assert len(adslab_times) == 3
+    assert adslab_times.count(0.0) >= 2  # at least 2 of 3 adslabs reused
+
+
+def test_adslab_cache_on_equals_off_incl_anomaly_metrics(tmp_path):
+    tmp = str(tmp_path)
+    off = _run_builder(tmp, "ad_b", _build_adslab_dup_dataset, dedup=False, slab_cache=False)
+    on = _run_builder(tmp, "ad_c", _build_adslab_dup_dataset, dedup=True, slab_cache=True)
+    keys = [k for k in off if isinstance(off[k], dict) and "0" in off[k]]
+    assert keys
+    for k in keys:
+        for fld in ("ads_eng", "adslab_tot_eng", "max_bond_change",
+                    "substrate_displacement", "adslab_max_disp",
+                    "adslab_pos_mae", "adslab_pos_rmsd", "adslab_energy_change"):
+            assert abs(on[k]["0"][fld] - off[k]["0"][fld]) < 1e-9, (k, fld)

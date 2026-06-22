@@ -355,7 +355,12 @@ class AdsorptionCalculation:
             slab_final = None
             adslab_initial = None
             adslab_final = None
-            
+            # Adslab reuse bookkeeping (mirrors the clean-slab cache)
+            adslab_cache_key = None
+            adslab_cached = False
+            cached_max_bond_change = None
+            cached_substrate_disp = None
+
             for structure in reaction_data["raw"]:
                 if "gas" not in str(structure) and structure == "star":
                     # Clean slab: relax once per (geometry+fix, seed) and reuse the
@@ -416,33 +421,57 @@ class AdsorptionCalculation:
                         time_total_slab += slab_time
                         steps_total_slab += slab_steps
 
-                elif "gas" not in str(structure):  # adslab (always relaxed)
+                elif "gas" not in str(structure):  # adslab
+                    # Relax once per (geometry+fix, adsorbate_indices, seed) and reuse
+                    # the result for every identical adslab. Same machinery as the clean
+                    # slab; the key also pins adsorbate_indices because the adslab metrics
+                    # (bond change, substrate displacement) depend on which atoms are the
+                    # adsorbate. The relaxed-energy and the frame-invariant metrics are
+                    # identical for an identical adslab -> same result, pure speedup.
                     POSCAR_str = reaction_data["raw"][structure]["atoms"]
                     fixed_indices = get_fixed_indices(POSCAR_str)
-                    (
-                        energy_calculated,
-                        steps_calculated,
-                        CONTCAR_calculated,
-                        time_calculated,
-                        energy_change,
-                    ) = energy_cal(
-                        self.calculators[i], POSCAR_str,
-                        self.config["f_crit_relax"], self.config["n_crit_relax"],
-                        self.config["damping"], fixed_indices, self.config["optimizer"],
-                        f"{log_path}/{structure}_{i}.txt" if log_path else None,
-                        f"{traj_path}/{structure}_{i}" if traj_path else None,
-                    )
-                    ads_energy_calc += energy_calculated * reaction_data["raw"][structure]["stoi"]
-                    time_consumed += time_calculated
-                    ads_step = steps_calculated
-                    ads_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, fixed_indices)
-                    ads_energy = energy_calculated
-                    ads_time = time_calculated
-                    ads_energy_change = energy_change
-                    time_total_ads += time_calculated
-                    steps_total_ads += steps_calculated
-                    adslab_initial = POSCAR_str.copy()
-                    adslab_final = CONTCAR_calculated.copy()
+                    ads_eref = reaction_data["raw"][structure].get("energy_ref")
+                    adslab_cache_key = f"ads:{reuse_key(POSCAR_str, ads_eref)}|{adsorbate_indices}_{i}th"
+                    cached = slab_energies.get(adslab_cache_key) if self.config.get("slab_cache", True) else None
+                    if cached is not None:
+                        ads_energy = cached["adslab_tot_eng"]
+                        ads_step = cached["adslab_steps"]
+                        ads_energy_change = cached["adslab_energy_change"]
+                        ads_displacement_stats = {
+                            "max_disp": cached["adslab_max_disp"],
+                            "mae_mobile": cached["adslab_pos_mae"],
+                            "rmsd_mobile": cached["adslab_pos_rmsd"],
+                        }
+                        cached_max_bond_change = cached["max_bond_change"]
+                        cached_substrate_disp = cached["substrate_displacement"]
+                        ads_time = 0.0  # cache hit: no relaxation performed
+                        adslab_cached = True
+                        ads_energy_calc += ads_energy * reaction_data["raw"][structure]["stoi"]
+                    else:
+                        (
+                            energy_calculated,
+                            steps_calculated,
+                            CONTCAR_calculated,
+                            time_calculated,
+                            energy_change,
+                        ) = energy_cal(
+                            self.calculators[i], POSCAR_str,
+                            self.config["f_crit_relax"], self.config["n_crit_relax"],
+                            self.config["damping"], fixed_indices, self.config["optimizer"],
+                            f"{log_path}/{structure}_{i}.txt" if log_path else None,
+                            f"{traj_path}/{structure}_{i}" if traj_path else None,
+                        )
+                        ads_energy_calc += energy_calculated * reaction_data["raw"][structure]["stoi"]
+                        time_consumed += time_calculated
+                        ads_step = steps_calculated
+                        ads_displacement_stats = calc_displacement(POSCAR_str, CONTCAR_calculated, fixed_indices)
+                        ads_energy = energy_calculated
+                        ads_time = time_calculated
+                        ads_energy_change = energy_change
+                        time_total_ads += time_calculated
+                        steps_total_ads += steps_calculated
+                        adslab_initial = POSCAR_str.copy()
+                        adslab_final = CONTCAR_calculated.copy()
 
                 else:  # Gas molecule
                     gas_tag = f"{structure}_{i}th"
@@ -477,18 +506,38 @@ class AdsorptionCalculation:
             # Calculate bond change and substrate displacement
             max_bond_change = 0.0
             substrate_disp = 0.0
-            
-            if adslab_initial is not None and adslab_final is not None and adsorbate_indices:
+
+            if adslab_cached:
+                # Reused adslab: both metrics are frame-invariant functions of
+                # (adslab_initial, adslab_final, adsorbate_indices), so the cached
+                # values are exactly what a fresh relaxation would reproduce.
+                max_bond_change = cached_max_bond_change
+                substrate_disp = cached_substrate_disp
+            elif adslab_initial is not None and adslab_final is not None and adsorbate_indices:
                 # Calculate max bond change for adsorbate
                 max_bond_change = self._calculate_max_bond_change(
                     adslab_initial, adslab_final, adsorbate_indices
                 )
-                
+
                 # Calculate substrate displacement in adslab
                 if slab_initial is not None and slab_final is not None:
                     substrate_disp = self._calculate_substrate_displacement(
                         slab_initial, slab_final, adslab_initial, adslab_final, adsorbate_indices
                     )
+
+                # Store the full adslab result so an identical adslab (same seed) reuses
+                # it instead of relaxing again.
+                if adslab_cache_key is not None and self.config.get("slab_cache", True):
+                    slab_energies[adslab_cache_key] = {
+                        "adslab_tot_eng": ads_energy,
+                        "adslab_steps": ads_step,
+                        "adslab_energy_change": ads_energy_change,
+                        "adslab_max_disp": ads_displacement_stats["max_disp"],
+                        "adslab_pos_mae": ads_displacement_stats["mae_mobile"],
+                        "adslab_pos_rmsd": ads_displacement_stats["rmsd_mobile"],
+                        "max_bond_change": max_bond_change,
+                        "substrate_displacement": substrate_disp,
+                    }
             
             # Store results for this calculator
             result[f"{i}"] = {
