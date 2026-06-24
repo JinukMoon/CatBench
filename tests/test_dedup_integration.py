@@ -57,18 +57,18 @@ def _build_dataset(path, dedup):
     _write_catbench_json(data, path, dedup=dedup)
 
 
-def _run(tmp, benchmark, dedup, slab_cache):
+def _run(tmp, benchmark, dedup, structure_cache):
     os.makedirs(os.path.join(tmp, "raw_data"), exist_ok=True)
     _build_dataset(os.path.join(tmp, "raw_data", f"{benchmark}_adsorption.json"), dedup)
     cwd = os.getcwd()
     os.chdir(tmp)
     try:
         AdsorptionCalculation(
-            [EMT(), EMT()], mlip_name=f"EMT_{int(dedup)}_{int(slab_cache)}",
-            benchmark=benchmark, save_files=False, slab_cache=slab_cache,
+            [EMT(), EMT()], mlip_name=f"EMT_{int(dedup)}_{int(structure_cache)}",
+            benchmark=benchmark, save_files=False, structure_cache=structure_cache,
         ).run()
-        rp = os.path.join(tmp, "result", f"EMT_{int(dedup)}_{int(slab_cache)}",
-                          f"EMT_{int(dedup)}_{int(slab_cache)}_result.json")
+        rp = os.path.join(tmp, "result", f"EMT_{int(dedup)}_{int(structure_cache)}",
+                          f"EMT_{int(dedup)}_{int(structure_cache)}_result.json")
         with open(rp) as f:
             res = json.load(f)
     finally:
@@ -80,20 +80,20 @@ def _ads_engs(res):
     return {k: v["0"]["ads_eng"] for k, v in res.items() if isinstance(v, dict) and "0" in v}
 
 
-def test_slab_cache_on_equals_off(tmp_path):
+def test_structure_cache_on_equals_off(tmp_path):
     tmp = str(tmp_path)
-    off = _ads_engs(_run(tmp, "ds_a", dedup=False, slab_cache=False))
-    on = _ads_engs(_run(tmp, "ds_b", dedup=False, slab_cache=True))
+    off = _ads_engs(_run(tmp, "ds_a", dedup=False, structure_cache=False))
+    on = _ads_engs(_run(tmp, "ds_b", dedup=False, structure_cache=True))
     assert set(on) == set(off) and len(on) == 3
     for k in off:
         assert abs(on[k] - off[k]) < 1e-6, (k, on[k], off[k])
 
 
-def test_single_point_slab_cached_on_equals_off(tmp_path):
+def test_single_point_structure_cached_on_equals_off(tmp_path):
     # the single_calculation (single-point) slab energy is also cached; ON==OFF
     tmp = str(tmp_path)
-    off = _run(tmp, "sp_a", dedup=False, slab_cache=False)
-    on = _run(tmp, "sp_b", dedup=False, slab_cache=True)
+    off = _run(tmp, "sp_a", dedup=False, structure_cache=False)
+    on = _run(tmp, "sp_b", dedup=False, structure_cache=True)
     keys = [k for k in off if isinstance(off[k], dict) and "single_calculation" in off[k]]
     assert keys
     for k in keys:
@@ -103,15 +103,15 @@ def test_single_point_slab_cached_on_equals_off(tmp_path):
 
 def test_storage_dedup_on_equals_off(tmp_path):
     tmp = str(tmp_path)
-    legacy = _ads_engs(_run(tmp, "ds_c", dedup=False, slab_cache=True))
-    deduped = _ads_engs(_run(tmp, "ds_d", dedup=True, slab_cache=True))
+    legacy = _ads_engs(_run(tmp, "ds_c", dedup=False, structure_cache=True))
+    deduped = _ads_engs(_run(tmp, "ds_d", dedup=True, structure_cache=True))
     for k in legacy:
         assert abs(deduped[k] - legacy[k]) < 1e-6, (k, deduped[k], legacy[k])
 
 
-def test_slab_cache_produces_hits(tmp_path):
+def test_structure_cache_produces_hits(tmp_path):
     tmp = str(tmp_path)
-    res = _run(tmp, "ds_e", dedup=True, slab_cache=True)
+    res = _run(tmp, "ds_e", dedup=True, structure_cache=True)
     # 3 reactions share one slab; per seed only the first relaxes, the rest are
     # cache hits (slab_time == 0).
     slab_times = [v["0"]["slab_time"] for k, v in res.items()
@@ -119,7 +119,7 @@ def test_slab_cache_produces_hits(tmp_path):
     assert slab_times.count(0.0) >= 2  # at least 2 of 3 reused
 
 
-def test_restart_resumes_slab_cache(tmp_path):
+def test_restart_resumes_structure_cache(tmp_path):
     tmp = str(tmp_path)
     benchmark = "ds_f"
     os.makedirs(os.path.join(tmp, "raw_data"), exist_ok=True)
@@ -127,9 +127,9 @@ def test_restart_resumes_slab_cache(tmp_path):
     save_dir = os.path.join(tmp, "result", "EMT_rs")
     # Pre-seed a slab cache file as if a prior run had relaxed the slab, then run:
     # if resume works, the run reuses it and matches a clean run.
-    full = _ads_engs(_run(tmp, "ds_g", dedup=True, slab_cache=True))
+    full = _ads_engs(_run(tmp, "ds_g", dedup=True, structure_cache=True))
     # second independent run must reproduce identical numbers (determinism)
-    again = _ads_engs(_run(tmp, "ds_h", dedup=True, slab_cache=True))
+    again = _ads_engs(_run(tmp, "ds_h", dedup=True, structure_cache=True))
     for k in full:
         assert abs(full[k] - again[k]) < 1e-9
 
@@ -163,16 +163,16 @@ def _build_adslab_dup_dataset(path, dedup):
     _write_catbench_json(data, path, dedup=dedup)
 
 
-def _run_builder(tmp, benchmark, builder, dedup, slab_cache):
+def _run_builder(tmp, benchmark, builder, dedup, structure_cache):
     os.makedirs(os.path.join(tmp, "raw_data"), exist_ok=True)
     builder(os.path.join(tmp, "raw_data", f"{benchmark}_adsorption.json"), dedup)
-    mlip = f"EMT_ad_{int(dedup)}_{int(slab_cache)}"
+    mlip = f"EMT_ad_{int(dedup)}_{int(structure_cache)}"
     cwd = os.getcwd()
     os.chdir(tmp)
     try:
         AdsorptionCalculation(
             [EMT(), EMT()], mlip_name=mlip, benchmark=benchmark,
-            save_files=False, slab_cache=slab_cache,
+            save_files=False, structure_cache=structure_cache,
         ).run()
         with open(os.path.join(tmp, "result", mlip, f"{mlip}_result.json")) as f:
             res = json.load(f)
@@ -183,7 +183,7 @@ def _run_builder(tmp, benchmark, builder, dedup, slab_cache):
 
 def test_adslab_cache_produces_hits(tmp_path):
     tmp = str(tmp_path)
-    res = _run_builder(tmp, "ad_a", _build_adslab_dup_dataset, dedup=True, slab_cache=True)
+    res = _run_builder(tmp, "ad_a", _build_adslab_dup_dataset, dedup=True, structure_cache=True)
     adslab_times = [v["0"]["adslab_time"] for k, v in res.items()
                     if isinstance(v, dict) and "0" in v]
     assert len(adslab_times) == 3
@@ -192,8 +192,8 @@ def test_adslab_cache_produces_hits(tmp_path):
 
 def test_adslab_cache_on_equals_off_incl_anomaly_metrics(tmp_path):
     tmp = str(tmp_path)
-    off = _run_builder(tmp, "ad_b", _build_adslab_dup_dataset, dedup=False, slab_cache=False)
-    on = _run_builder(tmp, "ad_c", _build_adslab_dup_dataset, dedup=True, slab_cache=True)
+    off = _run_builder(tmp, "ad_b", _build_adslab_dup_dataset, dedup=False, structure_cache=False)
+    on = _run_builder(tmp, "ad_c", _build_adslab_dup_dataset, dedup=True, structure_cache=True)
     keys = [k for k in off if isinstance(off[k], dict) and "0" in off[k]]
     assert keys
     for k in keys:
@@ -203,7 +203,7 @@ def test_adslab_cache_on_equals_off_incl_anomaly_metrics(tmp_path):
             assert abs(on[k]["0"][fld] - off[k]["0"][fld]) < 1e-9, (k, fld)
 
 
-def test_slab_cache_invalidated_when_relax_settings_change(tmp_path):
+def test_structure_cache_invalidated_when_relax_settings_change(tmp_path):
     # A cache written under one set of relaxation settings must NOT be reused when
     # the run's settings change (else stale, loosely-converged numbers reappear).
     tmp = str(tmp_path)
@@ -213,7 +213,7 @@ def test_slab_cache_invalidated_when_relax_settings_change(tmp_path):
     os.chdir(tmp)
     try:
         AdsorptionCalculation([EMT(), EMT()], mlip_name="EMT_cfg", benchmark="cfg",
-                              save_files=False, slab_cache=True, n_crit_relax=50).run()
+                              save_files=False, structure_cache=True, n_crit_relax=50).run()
         save_dir = os.path.join(tmp, "result", "EMT_cfg")
         cache = json.load(open(os.path.join(save_dir, "EMT_cfg_structure_cache.json")))
         assert "__relax_config__" in cache
@@ -221,13 +221,13 @@ def test_slab_cache_invalidated_when_relax_settings_change(tmp_path):
 
         # SAME settings -> cache kept
         same = AdsorptionCalculation([EMT(), EMT()], mlip_name="EMT_cfg", benchmark="cfg",
-                                     save_files=False, slab_cache=True, n_crit_relax=50)
+                                     save_files=False, structure_cache=True, n_crit_relax=50)
         _, _, _, se_same = same._load_existing_results(save_dir)
         assert len(se_same) > 1
 
         # DIFFERENT n_crit_relax -> cache discarded
         diff = AdsorptionCalculation([EMT(), EMT()], mlip_name="EMT_cfg", benchmark="cfg",
-                                     save_files=False, slab_cache=True, n_crit_relax=999)
+                                     save_files=False, structure_cache=True, n_crit_relax=999)
         _, _, _, se_diff = diff._load_existing_results(save_dir)
         assert se_diff == {}
     finally:

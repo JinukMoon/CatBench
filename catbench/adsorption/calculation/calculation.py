@@ -196,29 +196,29 @@ class AdsorptionCalculation:
         # Structure-reuse cache (slab + adslab + single-point) — restart-safe
         # sibling file, loaded independently of the result file so an interrupted
         # run resumes without re-relaxing already-seen structures.
-        slab_energies = {}
+        structure_cache = {}
         slab_path = os.path.join(save_directory, f"{self.mlip_name}_structure_cache.json")
         if os.path.exists(slab_path):
             try:
                 with open(slab_path) as f:
-                    slab_energies = json.load(f)
+                    structure_cache = json.load(f)
             except Exception:
-                slab_energies = {}
+                structure_cache = {}
             # Cached relaxations are valid only for the settings that produced them.
             # If the run's relaxation settings changed, discard the cache so
             # structures are re-relaxed instead of silently reusing stale results.
-            if slab_energies.get("__relax_config__") != self._relax_sig():
-                if slab_energies:
+            if structure_cache.get("__relax_config__") != self._relax_sig():
+                if structure_cache:
                     print("Relaxation settings changed since the structure cache "
                           "was written; discarding cache and recomputing.")
-                slab_energies = {}
-        return final_result, gas_energies, gas_energies_single, slab_energies
+                structure_cache = {}
+        return final_result, gas_energies, gas_energies_single, structure_cache
     
     def _run_basic(self):
         """Run basic benchmarking mode (full features with multiple calculators)."""
         ref_data = self._load_data()
         save_directory = self._setup_directories()
-        final_result, gas_energies, gas_energies_single, slab_energies = self._load_existing_results(save_directory)
+        final_result, gas_energies, gas_energies_single, structure_cache = self._load_existing_results(save_directory)
         failed = {}
 
         print("Starting calculations...")
@@ -241,13 +241,13 @@ class AdsorptionCalculation:
             
             try:
                 print(f"[{index+1}/{len(ref_data)}] {key}")
-                result = self._process_reaction_basic(key, ref_data[key], save_directory, gas_energies, gas_energies_single, slab_energies)
+                result = self._process_reaction_basic(key, ref_data[key], save_directory, gas_energies, gas_energies_single, structure_cache)
                 final_result[key] = result["reaction_result"]
 
                 # Save results every save_step calculations
                 if len(final_result) % self.config["save_step"] == 0:
                     print(f"Saving results at {len(final_result)} calculations...")
-                    self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single, slab_energies, failed)
+                    self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single, structure_cache, failed)
 
             except Exception as e:
                 print(f"Error occurred while processing {key}: {str(e)}")
@@ -257,7 +257,7 @@ class AdsorptionCalculation:
 
         # Final save to ensure all results are saved
         print(f"Final save: {len(final_result)} total calculations")
-        self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single, slab_energies, failed)
+        self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single, structure_cache, failed)
 
         print(f"{len(final_result)} succeeded, {len(failed)} failed")
         if failed:
@@ -265,7 +265,7 @@ class AdsorptionCalculation:
         print(f"{self.mlip_name} Benchmarking Finish")
         return save_directory
     
-    def _process_reaction_basic(self, key, reaction_data, save_directory, gas_energies, gas_energies_single, slab_energies):
+    def _process_reaction_basic(self, key, reaction_data, save_directory, gas_energies, gas_energies_single, structure_cache):
         """
         Process a single adsorption reaction in basic mode.
         
@@ -312,12 +312,12 @@ class AdsorptionCalculation:
                     # Single-point clean-slab energy is frame-invariant -> cache &
                     # reuse across frame-equivalent slabs (key tagged '|sp', calc[0]).
                     sp_key = f"{reuse_key(POSCAR_str, reaction_data['raw'][structure].get('energy_ref'))}|sp"
-                    if self.config.get("slab_cache", True) and sp_key in slab_energies:
-                        energy_calculated = slab_energies[sp_key]
+                    if self.config.get("structure_cache", True) and sp_key in structure_cache:
+                        energy_calculated = structure_cache[sp_key]
                     else:
                         energy_calculated = energy_cal_single(self.calculators[0], POSCAR_str)
-                        if self.config.get("slab_cache", True):
-                            slab_energies[sp_key] = energy_calculated
+                        if self.config.get("structure_cache", True):
+                            structure_cache[sp_key] = energy_calculated
                     slab_energy_single = energy_calculated
                 else:
                     energy_calculated = energy_cal_single(self.calculators[0], POSCAR_str)
@@ -407,7 +407,7 @@ class AdsorptionCalculation:
                     POSCAR_str = reaction_data["raw"][structure]["atoms"]
                     fixed_indices = get_fixed_indices(POSCAR_str)
                     slab_key = f"{reuse_keys[structure]}_{i}th"
-                    cached = slab_energies.get(slab_key) if self.config.get("slab_cache", True) else None
+                    cached = structure_cache.get(slab_key) if self.config.get("structure_cache", True) else None
                     if cached is not None:
                         slab_energy = cached["slab_tot_eng"]
                         slab_steps = cached["slab_steps"]
@@ -441,8 +441,8 @@ class AdsorptionCalculation:
                         slab_energy_change = energy_change
                         slab_initial = POSCAR_str.copy()
                         slab_final = CONTCAR_calculated.copy()
-                        if self.config.get("slab_cache", True):
-                            slab_energies[slab_key] = {
+                        if self.config.get("structure_cache", True):
+                            structure_cache[slab_key] = {
                                 "slab_tot_eng": slab_energy, "slab_steps": slab_steps,
                                 "slab_max_disp": slab_displacement_stats["max_disp"],
                                 "slab_pos_mae": slab_displacement_stats["mae_mobile"],
@@ -468,7 +468,7 @@ class AdsorptionCalculation:
                     POSCAR_str = reaction_data["raw"][structure]["atoms"]
                     fixed_indices = get_fixed_indices(POSCAR_str)
                     adslab_cache_key = f"ads:{reuse_keys[structure]}|{adsorbate_indices}_{i}th"
-                    cached = slab_energies.get(adslab_cache_key) if self.config.get("slab_cache", True) else None
+                    cached = structure_cache.get(adslab_cache_key) if self.config.get("structure_cache", True) else None
                     if cached is not None:
                         ads_energy = cached["adslab_tot_eng"]
                         ads_step = cached["adslab_steps"]
@@ -563,8 +563,8 @@ class AdsorptionCalculation:
 
                 # Store the full adslab result so an identical adslab (same seed) reuses
                 # it instead of relaxing again.
-                if adslab_cache_key is not None and self.config.get("slab_cache", True):
-                    slab_energies[adslab_cache_key] = {
+                if adslab_cache_key is not None and self.config.get("structure_cache", True):
+                    structure_cache[adslab_cache_key] = {
                         "adslab_tot_eng": ads_energy,
                         "adslab_steps": ads_step,
                         "adslab_energy_change": ads_energy_change,
@@ -822,7 +822,7 @@ class AdsorptionCalculation:
         
         return {"reaction_result": result, "time_consumed": time_consumed}
     
-    def _save_results_basic(self, save_directory, final_result, gas_energies, gas_energies_single, slab_energies, failures=None):
+    def _save_results_basic(self, save_directory, final_result, gas_energies, gas_energies_single, structure_cache, failures=None):
         """Save results for basic mode."""
         calculation_settings = get_calculation_settings(self.config)
         save_calculation_results(
@@ -834,14 +834,14 @@ class AdsorptionCalculation:
         # mirroring the gas-cache persistence discipline.
         # Stamp the relaxation settings so a later run with different settings
         # invalidates the cache instead of reusing stale relaxations.
-        slab_energies["__relax_config__"] = self._relax_sig()
+        structure_cache["__relax_config__"] = self._relax_sig()
         # Atomic write: a kill mid-write (e.g. SLURM walltime) must not truncate
         # the cache and lose restart-safety. Write to a temp file then rename.
-        slab_cache_path = os.path.join(save_directory, f"{self.mlip_name}_structure_cache.json")
-        tmp_path = slab_cache_path + ".tmp"
+        structure_cache_path = os.path.join(save_directory, f"{self.mlip_name}_structure_cache.json")
+        tmp_path = structure_cache_path + ".tmp"
         with open(tmp_path, "w") as f:
-            json.dump(slab_energies, f, cls=NumpyEncoder)
-        os.replace(tmp_path, slab_cache_path)
+            json.dump(structure_cache, f, cls=NumpyEncoder)
+        os.replace(tmp_path, structure_cache_path)
 
     def _save_results_oc20(self, save_directory, final_result, failures=None):
         """Save results for OC20 mode."""

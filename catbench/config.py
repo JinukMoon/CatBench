@@ -21,7 +21,7 @@ CALCULATION_DEFAULTS = {
     "f_crit_relax": 0.05,
     "n_crit_relax": 999,
     "damping": 1.0,
-    "slab_cache": True,  # reuse a relaxed clean-slab result across frame-equivalent slabs (1.1.1)
+    "structure_cache": True,  # reuse a relaxed clean-slab result across frame-equivalent slabs (1.1.1)
 
     # Bond analysis
     "chemical_bond_cutoff": 6.0,  # Chemical bond cutoff in Å for max_bond_change calculation
