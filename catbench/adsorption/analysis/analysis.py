@@ -1424,33 +1424,32 @@ class AdsorptionAnalysis:
                         if "steps_total" in key
                     )
 
-                    # Count anomalies (using current anomaly detection results)
+                    # Count anomaly sub-categories. Gate on the reaction's final
+                    # classification so a reaction only contributes to its OWN
+                    # parent group's detail columns. The raw per-reaction flags can
+                    # be set for several groups at once, but classify_reaction
+                    # assigns a single exclusive bucket by priority -- counting the
+                    # raw flags ungated would leak a reaction into another group's
+                    # breakdown (e.g. a reproduction_failure also showing up in the
+                    # unphysical-relaxation detail columns).
                     reaction_anomalies = anomaly_summary[reaction]["details"]
 
-                    if absolute_energy_MLIP:
-                        if reaction_anomalies["slab_conv"]:
+                    if classification == "unphysical_relaxation":
+                        if absolute_energy_MLIP and reaction_anomalies["slab_conv"]:
                             slab_conv += 1
-
-                    if reaction_anomalies["ads_conv"]:
-                        ads_conv += 1                    
-
-                    if absolute_energy_MLIP:
-                        if reaction_anomalies["slab_move"]:
+                        if reaction_anomalies["ads_conv"]:
+                            ads_conv += 1
+                        if absolute_energy_MLIP and reaction_anomalies["slab_move"]:
                             slab_move += 1
-
-                    if reaction_anomalies["ads_move"]:
+                        if reaction_anomalies["ads_move"]:
                             ads_move += 1
-
-                    if absolute_energy_MLIP:
-                        if reaction_anomalies["slab_seed"]:
+                    elif classification == "reproduction_failure":
+                        if absolute_energy_MLIP and reaction_anomalies["slab_seed"]:
                             slab_seed += 1
-
-                    if absolute_energy_MLIP:
-                        if reaction_anomalies["ads_seed"]:
+                        if absolute_energy_MLIP and reaction_anomalies["ads_seed"]:
                             ads_seed += 1
-
-                    if reaction_anomalies["ads_eng_seed"]:
-                        ads_eng_seed += 1
+                        if reaction_anomalies["ads_eng_seed"]:
+                            ads_eng_seed += 1
                         
             # Convert lists to numpy arrays for all categories
             for category in ads_data:
