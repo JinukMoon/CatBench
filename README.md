@@ -121,15 +121,18 @@ force a fresh CatHub download + preprocess:
 from catbench.adsorption import cathub_preprocessing
 
 cathub_preprocessing("MamunHighT2019")
+```
 
-# Multiple datasets with adsorbate name unification:
+Downloads are deterministic (stable `order: "id"` pagination + id-based dedup) and **fixed-atom constraints are handled automatically**: CatHub's deposited `constraints` are kept as-is, and for datasets where CatHub omits them the fixed set is **inferred from geometry** (clean slab vs adslab — atoms that do not move were held fixed) and injected as `FixAtoms`. A genuinely unconstrained slab is left free. So every preprocessed dataset is self-describing and runs correctly out of the box.
+
+**Combining datasets and unifying adsorbate names.** Pass a list of benchmarks to process them together, and an optional `adsorbate_integration` map to merge inconsistent adsorbate labels (e.g. `HO` → `OH`) into a single name:
+
+```python
 cathub_preprocessing(
     ["MamunHighT2019", "AraComputational2022"],
     adsorbate_integration={"HO": "OH", "O2H": "OOH"},
 )
 ```
-
-Downloads are deterministic (stable `order: "id"` pagination + id-based dedup) and **fixed-atom constraints are handled automatically**: CatHub's deposited `constraints` are kept as-is, and for datasets where CatHub omits them the fixed set is **inferred from geometry** (clean slab vs adslab — atoms that do not move were held fixed) and injected as `FixAtoms`. A genuinely unconstrained slab is left free. So every preprocessed dataset is self-describing and runs correctly out of the box.
 
 #### Option C: User VASP Data
 
