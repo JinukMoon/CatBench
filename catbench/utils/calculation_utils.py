@@ -15,15 +15,8 @@ import numpy as np
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.constraints import FixAtoms
 from ase.geometry import find_mic
-from ase.io import read, write
+from ase.io import write
 from ase.optimize import LBFGS, BFGS, GPMin, FIRE, MDMin, BFGSLineSearch, LBFGSLineSearch
-
-
-def convert_trajectory(filename):
-    """Convert trajectory file to extxyz format."""
-    images = read(filename, index=":")
-    os.remove(filename)
-    write(filename, images, format="extxyz")
 
 
 class NumpyEncoder(json.JSONEncoder):
