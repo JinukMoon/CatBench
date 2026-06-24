@@ -5,12 +5,14 @@ This module contains helper functions for energy calculations, structure manipul
 and data processing used by the main CatbenchCalculation class.
 """
 
+import io
 import json
 import os
 import time
 from copy import deepcopy
 
 import numpy as np
+from ase.calculators.singlepoint import SinglePointCalculator
 from ase.constraints import FixAtoms
 from ase.geometry import find_mic
 from ase.io import read, write
@@ -84,24 +86,38 @@ def energy_cal_gas(
             write(save_path, atoms)
 
         if log_path is not None and filename is not None:
-            logfile = open(log_path, "w", buffering=1)
-            logfile.write("######################\n")
-            logfile.write("##  MLIP relax starts  ##\n")
-            logfile.write("######################\n")
-            logfile.write("\nStep 1. Relaxing\n")
+            # Same I/O decoupling as energy_cal: collect trajectory frames and the
+            # log in memory during the run, flush to disk after the timer (keeps
+            # per-step NFS writes out of opt.run()).
+            log_buf = io.StringIO()
+            log_buf.write("######################\n")
+            log_buf.write("##  MLIP relax starts  ##\n")
+            log_buf.write("######################\n")
+            log_buf.write("\nStep 1. Relaxing\n")
+            frames = []
 
-            opt = opt_class(atoms, logfile=logfile, trajectory=filename)
+            def _snapshot(a=atoms, fr=frames):
+                snap = a.copy()
+                snap.calc = SinglePointCalculator(
+                    snap, energy=a.get_potential_energy(), forces=a.get_forces()
+                )
+                fr.append(snap)
+
+            opt = opt_class(atoms, logfile=log_buf, trajectory=None)
+            opt.attach(_snapshot, interval=1)
             time_init = time.time()
             opt.run(fmax=f_crit_relax, steps=500)
             elapsed_time = time.time() - time_init
 
-            convert_trajectory(filename)
-            logfile.write("Done!\n")
-            logfile.write(f"\nElapsed time: {elapsed_time} s\n\n")
-            logfile.write("###############################\n")
-            logfile.write("##  Relax terminated normally  ##\n")
-            logfile.write("###############################\n")
-            logfile.close()
+            # --- excluded from elapsed_time ---
+            write(filename, frames, format="extxyz")
+            log_buf.write("Done!\n")
+            log_buf.write(f"\nElapsed time: {elapsed_time} s\n\n")
+            log_buf.write("###############################\n")
+            log_buf.write("##  Relax terminated normally  ##\n")
+            log_buf.write("###############################\n")
+            with open(log_path, "w") as _lf:
+                _lf.write(log_buf.getvalue())
         else:
             # Run without saving log/trajectory
             opt = opt_class(atoms, logfile=None, trajectory=None)
@@ -167,22 +183,45 @@ def energy_cal(
             opt.run(fmax=f_crit_relax, steps=n_crit_relax)
             elapsed_time = time.time() - time_init
         else:
-            logfile = open(logfile, "w", buffering=1)
-            logfile.write("######################\n")
-            logfile.write("##  MLIP relax starts  ##\n")
-            logfile.write("######################\n")
-            logfile.write("\nStep 1. Relaxing\n")
-            opt = opt_class(atoms, logfile=logfile, trajectory=filename)
+            # Timing integrity: keep ALL disk I/O (trajectory + log) OUTSIDE the
+            # timer. The ASE optimizer, given trajectory=filename / a file logfile,
+            # writes to disk every step inside opt.run() -- on a network filesystem
+            # those per-step writes contaminate elapsed_time (and thus
+            # time_per_step) with filesystem speed instead of model compute. Here
+            # the trajectory frames and the log are collected in memory during the
+            # run (microseconds) and flushed to disk only after the timer stops.
+            log_buf = io.StringIO()
+            log_buf.write("######################\n")
+            log_buf.write("##  MLIP relax starts  ##\n")
+            log_buf.write("######################\n")
+            log_buf.write("\nStep 1. Relaxing\n")
+            frames = []
+
+            def _snapshot(a=atoms, fr=frames):
+                # copy() drops the calculator, so re-attach the (already cached)
+                # energy/forces as a SinglePointCalculator to keep the saved
+                # trajectory faithful; these reads are cached -> microseconds.
+                snap = a.copy()
+                snap.calc = SinglePointCalculator(
+                    snap, energy=a.get_potential_energy(), forces=a.get_forces()
+                )
+                fr.append(snap)
+
+            opt = opt_class(atoms, logfile=log_buf, trajectory=None)
+            opt.attach(_snapshot, interval=1)
             time_init = time.time()
             opt.run(fmax=f_crit_relax, steps=n_crit_relax)
             elapsed_time = time.time() - time_init
-            convert_trajectory(filename)
-            logfile.write("Done!\n")
-            logfile.write(f"\nElapsed time: {elapsed_time} s\n\n")
-            logfile.write("###############################\n")
-            logfile.write("##  Relax terminated normally  ##\n")
-            logfile.write("###############################\n")
-            logfile.close()
+
+            # --- everything below is excluded from elapsed_time ---
+            write(filename, frames, format="extxyz")
+            log_buf.write("Done!\n")
+            log_buf.write(f"\nElapsed time: {elapsed_time} s\n\n")
+            log_buf.write("###############################\n")
+            log_buf.write("##  Relax terminated normally  ##\n")
+            log_buf.write("###############################\n")
+            with open(logfile, "w") as _lf:
+                _lf.write(log_buf.getvalue())
         final_energy = atoms.get_potential_energy()
         energy_change = final_energy - initial_energy  # Negative = stabilization
 

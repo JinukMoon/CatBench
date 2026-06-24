@@ -186,7 +186,7 @@ def get_calculation_settings(config: Dict[str, Any]) -> Dict[str, Any]:
         from importlib.metadata import version
         catbench_version = version("catbench")
     except Exception:
-        catbench_version = "1.1.1"
+        catbench_version = "1.1.2"
     settings["catbench_version"] = catbench_version
     settings["constraint_mode"] = "fixatoms"
 

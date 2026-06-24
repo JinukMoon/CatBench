@@ -54,10 +54,10 @@ pip install -e .
 Minimum viable benchmark in 5 lines:
 
 ```python
-from catbench.adsorption import zenodo_download, AdsorptionCalculation, AdsorptionAnalysis
+from catbench.adsorption import get_benchmark, AdsorptionCalculation, AdsorptionAnalysis
 from your_mlip import YourCalculator
 
-zenodo_download("BM_dataset")                                            # 445 KB
+get_benchmark("BM_dataset")                                              # 0.3 MB
 calc = YourCalculator(...)
 AdsorptionCalculation([calc] * 3, mlip_name="MyMLIP", benchmark="BM_dataset").run()
 AdsorptionAnalysis().analysis()                                          # parity plots + Excel
@@ -75,32 +75,47 @@ For an end-to-end walkthrough on the publication's main benchmark (MamunHighT201
 
 ### Data Preparation
 
-CatBench supports three data sources, ordered by convenience.
+#### Option A: `get_benchmark` (Recommended)
 
-#### Option A: Pre-formatted Zenodo Download (Fastest, Recommended)
-
-Five main benchmark datasets from the CatBench publication are hosted as pre-processed JSON files on Zenodo ([DOI: 10.5281/zenodo.17157086](https://zenodo.org/records/17157086)):
+`get_benchmark(name)` fetches a dataset from the best available source
+automatically, so you can request any benchmark by name without knowing where it
+lives:
 
 ```python
-from catbench.adsorption import zenodo_download, list_zenodo_benchmarks
+from catbench.adsorption import get_benchmark, list_zenodo_benchmarks
 
-list_zenodo_benchmarks()
-# → ['BM_dataset', 'ComerGeneralized2024', 'FG_dataset', 'KHLOHC_origin', 'MamunHighT2019']
-
-zenodo_download("MamunHighT2019")   # writes raw_data/MamunHighT2019_adsorption.json
+get_benchmark("MamunHighT2019")   # writes raw_data/MamunHighT2019_adsorption.json
 ```
+
+It resolves each name through three sources in order:
+
+1. **Zenodo** — the featured datasets below, citable with a DOI ([concept DOI: 10.5281/zenodo.17157085](https://doi.org/10.5281/zenodo.17157085), always resolves to the latest version).
+2. **CatBench leaderboard** (`catbench.org`) — every dataset on the leaderboard, gzip-compressed for a fast download.
+3. **CatHub** — direct download + preprocessing for anything not hosted above.
+
+**Featured datasets (hosted on Zenodo):**
 
 | Benchmark | Size | Description |
 |---|---|---|
-| MamunHighT2019       | 195 MB | 45,130 small-molecule adsorptions on 2,035 bimetallic alloys |
-| FG_dataset           | 15 MB  | 2,651 C1–C10 organic molecules on transition metals |
-| KHLOHC_origin        | 11 MB  | Liquid organic hydrogen carrier adsorption (fine-tuning) |
-| ComerGeneralized2024 | 2 MB   | 325 adsorptions on metal oxide surfaces |
-| BM_dataset           | 0.4 MB | 32 industrial large molecules (biomass, polyurethane, plastics) |
+| OC20-Dense           | 397 MB | 65,073 dense adsorption configurations (Open Catalyst 2020) |
+| MamunHighT2019       | 95 MB  | 45,130 small-molecule adsorptions on 2,035 bimetallic alloys |
+| GameNetOx_oxide      | 11 MB  | 987 adsorptions on metal-oxide surfaces |
+| FG_dataset           | 9 MB   | 2,651 C1–C10 organic molecules on transition metals |
+| KHLOHC_origin        | 6 MB   | Liquid organic hydrogen carrier adsorption (fine-tuning) |
+| ComerGeneralized2024 | 1 MB   | 325 adsorptions on metal oxide surfaces |
+| BM_dataset           | 0.3 MB | 32 industrial large molecules (biomass, polyurethane, plastics) |
+
+```python
+list_zenodo_benchmarks()   # the featured names currently on Zenodo
+```
+
+For explicit control, the source-specific functions still work directly:
+`zenodo_download(name)` (Zenodo only) and `cathub_preprocessing(name)` (CatHub only).
 
 #### Option B: CatHub Database
 
-For benchmarks not on Zenodo, download and preprocess directly from CatHub:
+`get_benchmark` already falls back to CatHub automatically; call it directly to
+force a fresh CatHub download + preprocess:
 
 ```python
 from catbench.adsorption import cathub_preprocessing

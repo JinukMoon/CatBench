@@ -8,7 +8,11 @@ and analysis for Machine Learning Interatomic Potentials (MLIPs).
 from catbench.adsorption.calculation.calculation import AdsorptionCalculation
 from catbench.adsorption.data.cathub import cathub_preprocessing
 from catbench.adsorption.data.vasp import vasp_preprocessing, process_output
-from catbench.adsorption.data.zenodo import zenodo_download, list_zenodo_benchmarks
+from catbench.adsorption.data.zenodo import (
+    get_benchmark,
+    zenodo_download,
+    list_zenodo_benchmarks,
+)
 
 __all__ = [
     'AdsorptionCalculation',
@@ -16,6 +20,7 @@ __all__ = [
     'cathub_preprocessing',
     'vasp_preprocessing',
     'process_output',
+    'get_benchmark',
     'zenodo_download',
     'list_zenodo_benchmarks',
 ]

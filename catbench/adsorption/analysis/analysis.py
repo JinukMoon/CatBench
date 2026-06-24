@@ -593,8 +593,9 @@ class AdsorptionAnalysis:
         worksheet.merge_range(0, 10, 1, 10, "ADwT (%)", header_format)  # 2 rows
         worksheet.merge_range(0, 11, 1, 11, "AMDwT (%)", header_format)  # 2 rows
         worksheet.merge_range(0, 12, 1, 12, "Num_total", header_format)  # 2 rows
-        worksheet.merge_range(0, 13, 1, 13, "Time_total (s)", header_format)  # 2 rows
-        worksheet.merge_range(0, 14, 1, 14, "Time_per_step (s)", header_format)  # 2 rows - fixed in seconds
+        _tu = self.time_unit if self.time_unit in ("s", "ms", "µs", "us") else "s"
+        worksheet.merge_range(0, 13, 1, 13, f"Time_total ({_tu})", header_format)  # 2 rows
+        worksheet.merge_range(0, 14, 1, 14, f"Time_per_step ({_tu})", header_format)  # 2 rows
         worksheet.merge_range(0, 15, 1, 15, "Steps_total", header_format)  # 2 rows
 
         # Write anomaly sub-headers (Row 1) - excluding adsorbate migration
@@ -642,12 +643,11 @@ class AdsorptionAnalysis:
             write_cell(worksheet, row, col + 1, data["AMDwT"], number_format_3f)
             col += 2
 
-            # Numbers and time
+            # Numbers and time (raw values are seconds; convert to time_unit)
+            _tf = {"s": 1.0, "ms": 1e3, "µs": 1e6, "us": 1e6}.get(self.time_unit, 1.0)
             worksheet.write(row, col, data["Num_total"], number_format_0f)
-            worksheet.write(row, col + 1, data["Time_total"], number_format_0f)
-
-            # Time per step - fixed in seconds (no conversion)
-            worksheet.write(row, col + 2, data["Time_per_step"], number_format_3f)
+            worksheet.write(row, col + 1, data["Time_total"] * _tf, number_format_0f)
+            worksheet.write(row, col + 2, data["Time_per_step"] * _tf, number_format_3f)
 
             worksheet.write(row, col + 3, data["Steps_total"], number_format_0f)
 
