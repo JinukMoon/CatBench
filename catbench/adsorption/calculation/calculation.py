@@ -193,11 +193,11 @@ class AdsorptionCalculation:
             print("Beginning calculation from scratch.")
             final_result, gas_energies, gas_energies_single = {}, {}, {}
 
-        # Slab-relaxation cache (1.1.1) — restart-safe sibling file, loaded
-        # independently of the result file so an interrupted run resumes without
-        # re-relaxing already-seen clean slabs.
+        # Structure-reuse cache (slab + adslab + single-point) — restart-safe
+        # sibling file, loaded independently of the result file so an interrupted
+        # run resumes without re-relaxing already-seen structures.
         slab_energies = {}
-        slab_path = os.path.join(save_directory, f"{self.mlip_name}_slab_energies.json")
+        slab_path = os.path.join(save_directory, f"{self.mlip_name}_structure_cache.json")
         if os.path.exists(slab_path):
             try:
                 with open(slab_path) as f:
@@ -209,8 +209,8 @@ class AdsorptionCalculation:
             # structures are re-relaxed instead of silently reusing stale results.
             if slab_energies.get("__relax_config__") != self._relax_sig():
                 if slab_energies:
-                    print("Relaxation settings changed since the slab cache was "
-                          "written; discarding cache and recomputing.")
+                    print("Relaxation settings changed since the structure cache "
+                          "was written; discarding cache and recomputing.")
                 slab_energies = {}
         return final_result, gas_energies, gas_energies_single, slab_energies
     
@@ -837,7 +837,7 @@ class AdsorptionCalculation:
         slab_energies["__relax_config__"] = self._relax_sig()
         # Atomic write: a kill mid-write (e.g. SLURM walltime) must not truncate
         # the cache and lose restart-safety. Write to a temp file then rename.
-        slab_cache_path = os.path.join(save_directory, f"{self.mlip_name}_slab_energies.json")
+        slab_cache_path = os.path.join(save_directory, f"{self.mlip_name}_structure_cache.json")
         tmp_path = slab_cache_path + ".tmp"
         with open(tmp_path, "w") as f:
             json.dump(slab_energies, f, cls=NumpyEncoder)

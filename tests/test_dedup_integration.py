@@ -215,7 +215,7 @@ def test_slab_cache_invalidated_when_relax_settings_change(tmp_path):
         AdsorptionCalculation([EMT(), EMT()], mlip_name="EMT_cfg", benchmark="cfg",
                               save_files=False, slab_cache=True, n_crit_relax=50).run()
         save_dir = os.path.join(tmp, "result", "EMT_cfg")
-        cache = json.load(open(os.path.join(save_dir, "EMT_cfg_slab_energies.json")))
+        cache = json.load(open(os.path.join(save_dir, "EMT_cfg_structure_cache.json")))
         assert "__relax_config__" in cache
         assert sum(1 for k in cache if k != "__relax_config__") >= 1  # real entries exist
 
