@@ -96,12 +96,6 @@ PairD3::~PairD3() {
     if (allocated) {
         int n = atom->natoms;
         int np1 = atom->ntypes + 1;
-        int vdw_range_x = 2 * rep_vdw[0] + 1;
-        int vdw_range_y = 2 * rep_vdw[1] + 1;
-        int vdw_range_z = 2 * rep_vdw[2] + 1;
-        int cn_range_x  = 2 * rep_cn[0] + 1;
-        int cn_range_y  = 2 * rep_cn[1] + 1;
-        int cn_range_z  = 2 * rep_cn[2] + 1;
 
         //for (int i = 0; i < np1; i++) { cudaFree(setflag[i]); }; cudaFree(setflag);
         //for (int i = 0; i < np1; i++) { cudaFree(cutsq[i]); }; cudaFree(cutsq);
@@ -141,9 +135,10 @@ PairD3::~PairD3() {
         cudaFree(dc6_ijj_tot);
         cudaFree(c6_ij_tot);
 
-        for (int i = 0; i < vdw_range_x; i++) {
-            for (int j = 0; j < vdw_range_y; j++) {
-                for (int k = 0; k < vdw_range_z; k++) {
+        // FIX(tau-shape): free using the actually-allocated shape, not current reps.
+        for (int i = 0; i < tau_vdw_x_save; i++) {
+            for (int j = 0; j < tau_vdw_y_save; j++) {
+                for (int k = 0; k < tau_vdw_z_save; k++) {
                     cudaFree(tau_vdw[i][j][k]);
                 }
                 cudaFree(tau_vdw[i][j]);
@@ -151,9 +146,9 @@ PairD3::~PairD3() {
             cudaFree(tau_vdw[i]);
         }
         cudaFree(tau_vdw);
-        for (int i = 0; i < cn_range_x; i++) {
-            for (int j = 0; j < cn_range_y; j++) {
-                for (int k = 0; k < cn_range_z; k++) {
+        for (int i = 0; i < tau_cn_x_save; i++) {
+            for (int j = 0; j < tau_cn_y_save; j++) {
+                for (int k = 0; k < tau_cn_z_save; k++) {
                     cudaFree(tau_cn[i][j][k]);
                 }
                 cudaFree(tau_cn[i][j]);
@@ -890,25 +885,20 @@ void PairD3::set_lattice_vectors() {
     lat_v_3[1] =                yz / AU_TO_ANG;
     lat_v_3[2] = (boxzhi - boxzlo) / AU_TO_ANG;
 
-    int vdwrx_save = 2 * rep_vdw[0] + 1;
-    int vdwry_save = 2 * rep_vdw[1] + 1;
-    int vdwrz_save = 2 * rep_vdw[2] + 1;
-    int cnrx_save = 2 * rep_cn[0] + 1;
-    int cnry_save = 2 * rep_cn[1] + 1;
-    int cnrz_save = 2 * rep_cn[2] + 1;
-
     set_lattice_repetition_criteria(rthr, rep_vdw);
     set_lattice_repetition_criteria(cnthr, rep_cn);
 
     int vdw_range_x = 2 * rep_vdw[0] + 1;
     int vdw_range_y = 2 * rep_vdw[1] + 1;
     int vdw_range_z = 2 * rep_vdw[2] + 1;
-    int tau_loop_size_vdw = vdw_range_x * vdw_range_y * vdw_range_z * 3;
-    if (tau_loop_size_vdw != tau_idx_vdw_total_size) {
-        if (tau_idx_vdw != nullptr) {
-            for (int i = 0; i < vdwrx_save; i++) {
-                for (int j = 0; j < vdwry_save; j++) {
-                    for (int k = 0; k < vdwrz_save; k++) {
+    // FIX(tau-shape): reallocate when ANY per-axis range changes (not just the scalar
+    // product). free() uses the actually-allocated shape (tau_vdw_*_save), not the
+    // current reps, because a previous call may have legitimately skipped realloc.
+    if (vdw_range_x != tau_vdw_x_save || vdw_range_y != tau_vdw_y_save || vdw_range_z != tau_vdw_z_save) {
+        if (tau_vdw != nullptr) {
+            for (int i = 0; i < tau_vdw_x_save; i++) {
+                for (int j = 0; j < tau_vdw_y_save; j++) {
+                    for (int k = 0; k < tau_vdw_z_save; k++) {
                         cudaFree(tau_vdw[i][j][k]);
                     }
                     cudaFree(tau_vdw[i][j]);
@@ -918,7 +908,7 @@ void PairD3::set_lattice_vectors() {
             cudaFree(tau_vdw);
             cudaFree(tau_idx_vdw);
         }
-        tau_idx_vdw_total_size = tau_loop_size_vdw;
+        tau_idx_vdw_total_size = vdw_range_x * vdw_range_y * vdw_range_z * 3;
         cudaMallocManaged(&tau_vdw, vdw_range_x * sizeof(float***));
         for (int i = 0; i < vdw_range_x; i++) {
             cudaMallocManaged(&tau_vdw[i], vdw_range_y * sizeof(float**));
@@ -930,17 +920,18 @@ void PairD3::set_lattice_vectors() {
             }
         }
         cudaMallocManaged(&tau_idx_vdw, tau_idx_vdw_total_size * sizeof(int));
+        tau_vdw_x_save = vdw_range_x; tau_vdw_y_save = vdw_range_y; tau_vdw_z_save = vdw_range_z;
     }
 
     int cn_range_x  = 2 * rep_cn[0] + 1;
     int cn_range_y  = 2 * rep_cn[1] + 1;
     int cn_range_z  = 2 * rep_cn[2] + 1;
-    int tau_loop_size_cn = cn_range_x * cn_range_y * cn_range_z * 3;
-    if (tau_loop_size_cn != tau_idx_cn_total_size) {
-        if (tau_idx_cn != nullptr) {
-            for (int i = 0; i < cnrx_save; i++) {
-                for (int j = 0; j < cnry_save; j++) {
-                    for (int k = 0; k < cnrz_save; k++) {
+    // FIX(tau-shape): same per-axis guard for the CN tau arrays.
+    if (cn_range_x != tau_cn_x_save || cn_range_y != tau_cn_y_save || cn_range_z != tau_cn_z_save) {
+        if (tau_cn != nullptr) {
+            for (int i = 0; i < tau_cn_x_save; i++) {
+                for (int j = 0; j < tau_cn_y_save; j++) {
+                    for (int k = 0; k < tau_cn_z_save; k++) {
                         cudaFree(tau_cn[i][j][k]);
                     }
                     cudaFree(tau_cn[i][j]);
@@ -950,7 +941,7 @@ void PairD3::set_lattice_vectors() {
             cudaFree(tau_cn);
             cudaFree(tau_idx_cn);
         }
-        tau_idx_cn_total_size = tau_loop_size_cn;
+        tau_idx_cn_total_size = cn_range_x * cn_range_y * cn_range_z * 3;
         cudaMallocManaged(&tau_cn, cn_range_x * sizeof(float***));
         for (int i = 0; i < cn_range_x; i++) {
             cudaMallocManaged(&tau_cn[i], cn_range_y * sizeof(float**));
@@ -962,6 +953,7 @@ void PairD3::set_lattice_vectors() {
             }
         }
         cudaMallocManaged(&tau_idx_cn, tau_idx_cn_total_size * sizeof(int));
+        tau_cn_x_save = cn_range_x; tau_cn_y_save = cn_range_y; tau_cn_z_save = cn_range_z;
     }
 }
 
@@ -2036,6 +2028,10 @@ extern "C" { // C wrapper for ctypes or cffi
     }
 
     void pair_set_atom(PairD3* pair, int natoms, int ntypes, int* type, double* x_flat) {
+        // FIX(leak): previous call's allocations were never freed -> grew unbounded over a
+        // benchmark. Atom's dtor does not touch x, so free the x pointer-array explicitly.
+        if (pair->atom)     { delete[] pair->atom->x; delete pair->atom; pair->atom = nullptr; }
+        if (pair->result_F) { delete[] pair->result_F; pair->result_F = nullptr; }
         double** x = new double*[natoms];
         for (int i = 0; i < natoms; i++) {
             x[i] = x_flat + i * 3;

@@ -252,6 +252,12 @@ protected:
     int* tau_idx_cn = nullptr;
     int tau_idx_vdw_total_size;
     int tau_idx_cn_total_size;
+    // FIX(tau-shape): track the ACTUAL allocated per-axis shape of the tau nested arrays.
+    // The old realloc guard compared only the scalar product, so two cells with the same
+    // product but a transposed shape (e.g. (10,9,2)->(9,10,2)) skipped reallocation and
+    // precalculate_tau_array() then wrote out of bounds -> segfault.
+    int tau_vdw_x_save = -1, tau_vdw_y_save = -1, tau_vdw_z_save = -1;
+    int tau_cn_x_save  = -1, tau_cn_y_save  = -1, tau_cn_z_save  = -1;
     /*--------- For loop over tau (translation of cell) ---------*/
 
     /*--------- For cuda memory transfer (pointerized) ---------*/
