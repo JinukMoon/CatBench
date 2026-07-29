@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://catbench.org"><img src="https://img.shields.io/badge/Leaderboard-catbench.org-orange.svg" alt="Leaderboard"></a>
+  <a href="https://catbench.org/docs"><img src="https://img.shields.io/badge/Docs-catbench.org%2Fdocs-06b6d4.svg" alt="Documentation"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://pypi.org/project/catbench/"><img src="https://img.shields.io/pypi/v/catbench" alt="Version"></a>
@@ -427,6 +428,7 @@ Options are grouped into **Required**, **Commonly tuned**, and **Advanced** (col
 | Parameter | Description | Default |
 |---|---|---|
 | `damping` | Optimization damping factor. | 1.0 |
+| `structure_cache` | Reuse a relaxed clean-slab result across frame-equivalent slabs (and gas references) — large GPU savings on datasets with shared slabs (v1.1.1+). | True |
 | `optimizer` | ASE optimizer: LBFGS / LBFGSLineSearch / BFGS / BFGSLineSearch / GPMin / MDMin / FIRE. | "LBFGS" |
 | `save_step` | Save interval for `result.json` during long runs. | 50 |
 | `chemical_bond_cutoff` | Cutoff distance for bond-change detection (A). | 6.0 |
