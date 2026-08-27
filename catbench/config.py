@@ -45,6 +45,7 @@ ANALYSIS_DEFAULTS = {
     "energy_thrs": 2.0,
     "energy_cutoff": None,  # Energy cutoff for analysis inclusion (None = no filtering)
     "reproduction_thrs": 0.2,
+    "gas_shift_min_n": 5,  # Min structure-valid reactions per adsorbate to fit a gas-reference shift
     
     # Adsorbate migration detection thresholds
     "bond_length_change_threshold": 0.2,  # 20% bond length change threshold for anomaly detection

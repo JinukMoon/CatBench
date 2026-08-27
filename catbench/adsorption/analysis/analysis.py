@@ -118,6 +118,7 @@ class AdsorptionAnalysis:
         self.energy_thrs = kwargs.get("energy_thrs", get_default("energy_thrs", ANALYSIS_DEFAULTS))
         self.energy_cutoff = kwargs.get("energy_cutoff", get_default("energy_cutoff", ANALYSIS_DEFAULTS))
         self.reproduction_thrs = kwargs.get("reproduction_thrs", get_default("reproduction_thrs", ANALYSIS_DEFAULTS))
+        self.gas_shift_min_n = kwargs.get("gas_shift_min_n", get_default("gas_shift_min_n", ANALYSIS_DEFAULTS))
 
         # Adsorbate migration detection thresholds
         self.bond_length_change_threshold = kwargs.get("bond_length_change_threshold", get_default("bond_length_change_threshold", ANALYSIS_DEFAULTS))
@@ -157,6 +158,10 @@ class AdsorptionAnalysis:
         self.mlip_name_map = kwargs.get("mlip_name_map", get_default("mlip_name_map", ANALYSIS_DEFAULTS)) or {}
         # Plot toggle
         self.plot_enabled = kwargs.get("plot_enabled", get_default("plot_enabled", ANALYSIS_DEFAULTS))
+        # Plot scope: "full" (all mono/multi plots) or "multi_core" (only the
+        # multi total/normal parity plots + their gas-shifted twins — the set
+        # the leaderboard serves; much faster for large re-runs)
+        self.plot_scope = kwargs.get("plot_scope", "full")
 
         # Color and marker settings for multi plots
         self.colors = PLOT_COLORS
@@ -483,7 +488,178 @@ class AdsorptionAnalysis:
 
         return MAEs
 
-    def _create_excel_output(self, main_data, anomaly_data, MLIPs_data, analysis_adsorbates):
+    def _build_shifted_ads_data(self, ads_data, shifts):
+        """Build an ads_data twin with per-adsorbate shifts applied.
+
+        MLIP energies (median/min/max) are shifted per adsorbate; reactions in
+        the structure-valid pool (normal + energy_anomaly) are re-classified on
+        the shifted errors, structural categories keep their membership. The
+        result has the exact shape multi_plotter expects, and per-adsorbate
+        counts are unchanged, so color/marker ordering matches the unshifted
+        plots.
+        """
+        categories = ("normal", "energy_anomaly", "adsorbate_migration",
+                      "unphysical_relaxation", "reproduction_failure")
+        keys = ("DFT", "MLIP", "MLIP_min", "MLIP_max")
+        out = {"all": {c: {k: [] for k in keys} for c in categories}}
+
+        for adsorbate, cats in ads_data.items():
+            if adsorbate == "all":
+                continue
+            s = shifts.get(adsorbate, {}).get("shift")
+            applied = s if s is not None else 0.0
+            entry = {c: {k: [] for k in keys} for c in categories}
+
+            # Structural categories: same membership, shifted MLIP values
+            for c in ("adsorbate_migration", "unphysical_relaxation", "reproduction_failure"):
+                d = cats[c]
+                if len(d["DFT"]) == 0:
+                    continue
+                entry[c]["DFT"].append(d["DFT"])
+                entry[c]["MLIP"].append(d["MLIP"] - applied)
+                entry[c]["MLIP_min"].append(d["MLIP_min"] - applied)
+                entry[c]["MLIP_max"].append(d["MLIP_max"] - applied)
+
+            # Structure-valid pool: re-classify on shifted errors
+            for c in ("normal", "energy_anomaly"):
+                d = cats[c]
+                if len(d["DFT"]) == 0:
+                    continue
+                mlip_s = d["MLIP"] - applied
+                normal_mask = np.abs(mlip_s - d["DFT"]) <= self.energy_thrs
+                for target, mask in (("normal", normal_mask), ("energy_anomaly", ~normal_mask)):
+                    if not np.any(mask):
+                        continue
+                    entry[target]["DFT"].append(d["DFT"][mask])
+                    entry[target]["MLIP"].append(mlip_s[mask])
+                    entry[target]["MLIP_min"].append(d["MLIP_min"][mask] - applied)
+                    entry[target]["MLIP_max"].append(d["MLIP_max"][mask] - applied)
+
+            # Concatenate parts into arrays; feed the "all" aggregate
+            out[adsorbate] = {}
+            for c in categories:
+                out[adsorbate][c] = {}
+                for k in keys:
+                    parts = entry[c][k]
+                    arr = np.concatenate(parts) if parts else np.array([])
+                    out[adsorbate][c][k] = arr
+                    if len(arr) > 0:
+                        out["all"][c][k].append(arr)
+
+        for c in categories:
+            for k in keys:
+                parts = out["all"][c][k]
+                out["all"][c][k] = np.concatenate(parts) if parts else np.array([])
+
+        return out
+
+    def _compute_gas_shift_data(self, ads_data, mlip_result, analysis_adsorbates):
+        """Per-adsorbate gas-reference shift correction.
+
+        For each adsorbate, the shift is the MEDIAN signed error (MLIP - DFT)
+        over the structure-valid reactions (normal + energy_anomaly). A genuine
+        gas-reference offset moves every reaction of an adsorbate equally, so
+        the median recovers it exactly — while, unlike the mean, it is not
+        dragged toward a minority cluster of wild (bimodal) energy anomalies.
+        Structural failures
+        (reproduction_failure, unphysical_relaxation, adsorbate_migration) are
+        excluded from the fit because their geometries are broken; energy
+        anomalies are included because a large systematic gas-reference offset
+        is exactly what pushes reactions over energy_thrs — excluding them
+        would bias the fit against the offset it is meant to remove. Groups
+        with fewer than gas_shift_min_n structure-valid reactions get no
+        correction (shift None, 0 applied) to avoid overfitting tiny samples.
+
+        After shifting, the energy-anomaly classification is re-evaluated with
+        the same energy_thrs (a reaction that was anomalous only due to the
+        offset becomes normal, and vice versa); structural categories are
+        unaffected by a constant energy shift and stay fixed.
+        """
+        struct_categories = ("adsorbate_migration", "unphysical_relaxation", "reproduction_failure")
+        shifts = {}
+        per_ads = {}
+        abs_err_total_parts = []
+        abs_err_normal_parts = []
+        normal_count_shifted = 0
+        energy_anomaly_count_shifted = 0
+
+        for adsorbate in analysis_adsorbates:
+            if adsorbate not in ads_data:
+                continue
+            cat = ads_data[adsorbate]
+
+            # Fit population: structure-valid reactions (normal + energy_anomaly)
+            fit_err = np.concatenate([
+                cat["normal"]["MLIP"] - cat["normal"]["DFT"],
+                cat["energy_anomaly"]["MLIP"] - cat["energy_anomaly"]["DFT"],
+            ])
+            n_fit = len(fit_err)
+            shift = float(np.median(fit_err)) if n_fit >= self.gas_shift_min_n else None
+            applied = shift if shift is not None else 0.0
+            shifts[adsorbate] = {"shift": shift, "n_fit": n_fit}
+
+            # Re-classify energy anomaly on shifted errors (structure-valid pool only)
+            pool_err = fit_err - applied
+            normal_mask = np.abs(pool_err) <= self.energy_thrs
+            n_normal_s = int(np.sum(normal_mask))
+            n_energy_anom_s = n_fit - n_normal_s
+
+            # Structural failures keep their classification; shift still applies
+            # to their energies for the total-MAE aggregate.
+            struct_err_parts = [
+                cat[c]["MLIP"] - cat[c]["DFT"] for c in struct_categories if len(cat[c]["DFT"]) > 0
+            ]
+            struct_err = (np.concatenate(struct_err_parts) - applied) if struct_err_parts else np.array([])
+            all_err = np.concatenate([pool_err, struct_err])
+
+            per_ads[adsorbate] = {
+                "MAE_total_shifted": float(np.mean(np.abs(all_err))) if len(all_err) > 0 else np.nan,
+                "MAE_normal_shifted": float(np.mean(np.abs(pool_err[normal_mask]))) if n_normal_s > 0 else np.nan,
+                "Num_normal_shifted": n_normal_s,
+                "Num_energy_anomaly_shifted": n_energy_anom_s,
+            }
+            abs_err_total_parts.append(np.abs(all_err))
+            abs_err_normal_parts.append(np.abs(pool_err[normal_mask]))
+            normal_count_shifted += n_normal_s
+            energy_anomaly_count_shifted += n_energy_anom_s
+
+        # Single-point MAE with the same per-adsorbate shifts applied
+        single_abs_err = []
+        for reaction in mlip_result:
+            if reaction == "calculation_settings":
+                continue
+            adsorbate = find_adsorbate(mlip_result[reaction]["reference"])
+            if self.energy_cutoff is not None:
+                try:
+                    if mlip_result[reaction]["reference"]["ads_eng"] > self.energy_cutoff:
+                        continue
+                except (KeyError, TypeError):
+                    continue
+            if adsorbate and adsorbate in analysis_adsorbates:
+                try:
+                    dft_value = mlip_result[reaction]["reference"]["ads_eng"]
+                    single_value = mlip_result[reaction]["single_calculation"]["ads_eng"]
+                except (KeyError, TypeError):
+                    continue
+                s = shifts.get(adsorbate, {}).get("shift")
+                applied = s if s is not None else 0.0
+                single_abs_err.append(abs(single_value - applied - dft_value))
+
+        err_total = np.concatenate(abs_err_total_parts) if abs_err_total_parts else np.array([])
+        err_normal = np.concatenate(abs_err_normal_parts) if abs_err_normal_parts else np.array([])
+
+        return {
+            "shifts": shifts,
+            "per_ads": per_ads,
+            "MAE_total_shifted": float(np.mean(err_total)) if len(err_total) > 0 else np.nan,
+            "MAE_normal_shifted": float(np.mean(err_normal)) if len(err_normal) > 0 else np.nan,
+            "MAE_single_shifted": float(np.mean(single_abs_err)) if single_abs_err else np.nan,
+            "Num_normal_shifted": normal_count_shifted,
+            "Num_energy_anomaly_shifted": energy_anomaly_count_shifted,
+        }
+
+    def _create_excel_output(self, main_data, anomaly_data, MLIPs_data, analysis_adsorbates,
+                             main_data_shifted=None, anomaly_data_shifted=None):
         """Create Excel output file."""
         output_file = f"{self.benchmarking_name}_Benchmarking_Analysis.xlsx"
 
@@ -491,9 +667,16 @@ class AdsorptionAnalysis:
             # Create custom MLIP_Data sheet with merged cells
             self._create_mlip_data_sheet(writer, main_data)
 
+            # Gas-shift-corrected twin of MLIP_Data (same layout, recomputed values)
+            if main_data_shifted:
+                self._create_mlip_data_sheet(writer, main_data_shifted, sheet_name="MLIP_Data_shifted")
+
             if anomaly_data:
                 # Create custom anomaly sheet with merged cells like main sheet
                 self._create_anomaly_sheet(writer, anomaly_data)
+
+            if anomaly_data_shifted:
+                self._create_anomaly_sheet(writer, anomaly_data_shifted, sheet_name="anomaly_shifted")
 
             for mlip_name in sorted(MLIPs_data.keys(), key=str.lower):
                 data_dict = MLIPs_data[mlip_name]
@@ -503,6 +686,9 @@ class AdsorptionAnalysis:
                 mlip_result = self._mlip_result_cache.get(mlip_name, {})
 
                 display_name = self._display_mlip_name(mlip_name)
+                gas_shift = data_dict.get("gas_shift", {})
+                gs_shifts = gas_shift.get("shifts", {})
+                gs_per_ads = gas_shift.get("per_ads", {})
                 for adsorbate in analysis_adsorbates:
                     if "normal" in data_dict and f"len_{adsorbate}" in data_dict["normal"]:
                         normal_count = data_dict["normal"][f"len_{adsorbate}"]
@@ -539,6 +725,14 @@ class AdsorptionAnalysis:
                             "Num_unphysical_relaxation": anomaly_breakdown["unphysical_relaxation_count"],
                             "Num_adsorbate_migration": anomaly_breakdown["adsorbate_migration_count"],
                             "Num_energy_anomaly": anomaly_breakdown["energy_anomaly_count"],
+                            # Gas shift correction block (blank cells when not computed)
+                            "Shift": (gs_shifts.get(adsorbate, {}).get("shift")
+                                      if gs_shifts.get(adsorbate, {}).get("shift") is not None else np.nan),
+                            "N_fit": gs_shifts.get(adsorbate, {}).get("n_fit", 0),
+                            "MAE_total_shifted": gs_per_ads.get(adsorbate, {}).get("MAE_total_shifted", np.nan),
+                            "MAE_normal_shifted": gs_per_ads.get(adsorbate, {}).get("MAE_normal_shifted", np.nan),
+                            "Num_normal_shifted": gs_per_ads.get(adsorbate, {}).get("Num_normal_shifted", 0),
+                            "Num_energy_anomaly_shifted": gs_per_ads.get(adsorbate, {}).get("Num_energy_anomaly_shifted", 0),
                         })
 
                 if data_tmp:
@@ -550,10 +744,10 @@ class AdsorptionAnalysis:
 
         print(f"Excel file '{output_file}' created successfully.")
 
-    def _create_mlip_data_sheet(self, writer, main_data):
+    def _create_mlip_data_sheet(self, writer, main_data, sheet_name="MLIP_Data"):
         """Create MLIP_Data sheet with custom merged cell structure."""
         workbook = writer.book
-        worksheet = workbook.add_worksheet("MLIP_Data")
+        worksheet = workbook.add_worksheet(sheet_name)
 
         # Define formats
         header_format = workbook.add_format({
@@ -660,10 +854,10 @@ class AdsorptionAnalysis:
         for row in range(len(main_data) + 2):
             worksheet.set_row(row, 25)
 
-    def _create_anomaly_sheet(self, writer, anomaly_data):
+    def _create_anomaly_sheet(self, writer, anomaly_data, sheet_name="anomaly"):
         """Create anomaly sheet with custom merged cell structure like main sheet."""
         workbook = writer.book
-        worksheet = workbook.add_worksheet("anomaly")
+        worksheet = workbook.add_worksheet(sheet_name)
 
         # Define formats
         header_format = workbook.add_format({
@@ -799,16 +993,29 @@ class AdsorptionAnalysis:
         worksheet.merge_range(0, 7, 1, 7, "Num_normal", header_format)  # 2 rows
         worksheet.merge_range(0, 8, 1, 8, "Num_adsorbate_migration", header_format)  # 2 rows - independent
         worksheet.merge_range(0, 9, 0, 12, "Anomaly count", header_format)  # 4 columns
+        worksheet.merge_range(0, 13, 0, 18, "Gas shift correction", header_format)  # 6 columns
 
         # Write anomaly sub-headers (Row 1) - excluding adsorbate migration
         anomaly_subheaders = [
             "total",
             "reproduction failure",
-            "unphysical relaxation", 
+            "unphysical relaxation",
             "energy anomaly"
         ]
 
         for col, subheader in enumerate(anomaly_subheaders, 9):  # Start from column 9
+            worksheet.write(1, col, subheader, header_format)
+
+        # Write gas shift sub-headers (Row 1)
+        gas_shift_subheaders = [
+            "Shift (eV)",
+            "N_fit",
+            "MAE_total_shifted (eV)",
+            "MAE_normal_shifted (eV)",
+            "Num_normal_shifted",
+            "Num_energy_anomaly_shifted",
+        ]
+        for col, subheader in enumerate(gas_shift_subheaders, 13):
             worksheet.write(1, col, subheader, header_format)
 
         # Write data starting from row 2
@@ -844,9 +1051,18 @@ class AdsorptionAnalysis:
             worksheet.write(row, col + 1, data["Num_reproduction_failure"], number_format_0f)
             worksheet.write(row, col + 2, data["Num_unphysical_relaxation"], number_format_0f)
             worksheet.write(row, col + 3, data["Num_energy_anomaly"], number_format_0f)
+            col += 4
+
+            # Gas shift correction block (6 columns; blank cells when not computed)
+            write_cell(worksheet, row, col, data.get("Shift", np.nan), number_format_3f)
+            worksheet.write(row, col + 1, data.get("N_fit", 0), number_format_0f)
+            write_cell(worksheet, row, col + 2, data.get("MAE_total_shifted", np.nan), number_format_3f)
+            write_cell(worksheet, row, col + 3, data.get("MAE_normal_shifted", np.nan), number_format_3f)
+            worksheet.write(row, col + 4, data.get("Num_normal_shifted", 0), number_format_0f)
+            worksheet.write(row, col + 5, data.get("Num_energy_anomaly_shifted", 0), number_format_0f)
 
         # Set column widths - adjusted for independent adsorbate migration
-        column_widths = [20, 18, 18, 18, 15, 15, 15, 15, 25, 15, 20, 25, 18]
+        column_widths = [20, 18, 18, 18, 15, 15, 15, 15, 25, 15, 20, 25, 18, 12, 10, 22, 24, 20, 26]
         for col, width in enumerate(column_widths):
             worksheet.set_column(col, col, width)
 
@@ -1281,6 +1497,8 @@ class AdsorptionAnalysis:
 
         main_data = []
         anomaly_data = []
+        main_data_shifted = []
+        anomaly_data_shifted = []
         MLIP_datas = {}
 
         # Get MLIP list
@@ -1490,10 +1708,18 @@ class AdsorptionAnalysis:
                     # Setup plot directories once
                     plot_save_path, mono_path, multi_path = self._setup_plot(mlip_name)
 
-                    # Generate all plots
-                    MAE_total, MAE_normal, MAEs_total_multi, MAEs_normal_multi = self._plot_generator(
-                        ads_data, single_data, mlip_name, min_value, max_value, mono_path, multi_path
-                    )
+                    if self.plot_scope == "multi_core":
+                        # Only the leaderboard-served plots (multi total/normal)
+                        total_categories = ["normal", "adsorbate_migration", "energy_anomaly", "unphysical_relaxation", "reproduction_failure"]
+                        MAEs_total_multi = self.multi_plotter(ads_data, mlip_name, total_categories, "total", min_value, max_value, multi_path)
+                        MAEs_normal_multi = self.multi_plotter(ads_data, mlip_name, ["normal"], "normal", min_value, max_value, multi_path)
+                        MAE_total = self._calculate_mae_from_data(ads_data, total_categories)
+                        MAE_normal = self._calculate_mae_from_data(ads_data, ["normal"])
+                    else:
+                        # Generate all plots
+                        MAE_total, MAE_normal, MAEs_total_multi, MAEs_normal_multi = self._plot_generator(
+                            ads_data, single_data, mlip_name, min_value, max_value, mono_path, multi_path
+                        )
                 else:
                     print(f"  Skipping plot generation for {self._display_mlip_name(mlip_name)} (plot_enabled=False)")
                     # Calculate MAEs without generating plots
@@ -1590,8 +1816,55 @@ class AdsorptionAnalysis:
 
                 anomaly_data.append(anomaly_data_dict)
 
+                # Gas-reference shift correction (per-adsorbate median-error removal,
+                # fitted on structure-valid reactions, energy anomaly re-classified)
+                gas_shift = self._compute_gas_shift_data(ads_data, mlip_result, analysis_adsorbates)
+                MLIP_datas[mlip_name]["gas_shift"] = gas_shift
+
+                # Gas-shifted parity plots (multi total/normal twins)
+                if self.plot_enabled:
+                    _, _, multi_path_gs = self._setup_plot(mlip_name)
+                    ads_data_shifted = self._build_shifted_ads_data(ads_data, gas_shift["shifts"])
+                    total_categories = ["normal", "adsorbate_migration", "energy_anomaly", "unphysical_relaxation", "reproduction_failure"]
+                    self.multi_plotter(ads_data_shifted, mlip_name, total_categories, "total_shifted", min_value, max_value, multi_path_gs)
+                    self.multi_plotter(ads_data_shifted, mlip_name, ["normal"], "normal_shifted", min_value, max_value, multi_path_gs)
+
+                normal_count_s = gas_shift["Num_normal_shifted"]
+                energy_anomaly_count_s = gas_shift["Num_energy_anomaly_shifted"]
+                anomaly_count_s = (len(ads_data["all"]["reproduction_failure"]["DFT"]) +
+                                   len(ads_data["all"]["unphysical_relaxation"]["DFT"]) +
+                                   energy_anomaly_count_s)
+
+                main_data_shifted.append({
+                    "MLIP_name": self._display_mlip_name(mlip_name),
+                    "Normal_rate": (normal_count_s / total_num) * 100 if total_num > 0 else 0,
+                    "Anomaly_rate": (anomaly_count_s / total_num) * 100 if total_num > 0 else 0,
+                    "Reproduction_failure_rate": reproduction_failure_rate,
+                    "Unphysical_relaxation_rate": unphysical_relaxation_rate,
+                    "Adsorbate_migration_rate": adsorbate_migration_rate,
+                    "Energy_anomaly_rate": (energy_anomaly_count_s / total_num) * 100 if total_num > 0 else 0,
+                    "MAE_total": gas_shift["MAE_total_shifted"],
+                    "MAE_normal": gas_shift["MAE_normal_shifted"],
+                    "MAE_single": gas_shift["MAE_single_shifted"],
+                    "ADwT": adwt_value,
+                    "AMDwT": amdwt_value,
+                    "Num_total": total_num,
+                    "Time_total": time_accum,
+                    "Time_per_step": time_accum / step_accum if step_accum > 0 else 0,
+                    "Steps_total": step_accum,
+                })
+
+                anomaly_data_shifted.append({
+                    **anomaly_data_dict,
+                    "Num_normal": normal_count_s,
+                    "Num_anomaly_total": anomaly_count_s,
+                    "Num_energy_anomaly": energy_anomaly_count_s,
+                })
+
         # Create Excel output
-        self._create_excel_output(main_data, anomaly_data, MLIP_datas, list(analysis_adsorbates))
+        self._create_excel_output(main_data, anomaly_data, MLIP_datas, list(analysis_adsorbates),
+                                  main_data_shifted=main_data_shifted,
+                                  anomaly_data_shifted=anomaly_data_shifted)
 
 
     def _create_single_data_structure(self, mlip_result, analysis_adsorbates):
