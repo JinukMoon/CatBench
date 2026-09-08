@@ -1559,6 +1559,11 @@ class AdsorptionAnalysis:
             for reaction in mlip_result:
                 if reaction == "calculation_settings":
                     continue
+                # Reactions dropped by energy_cutoff are absent from
+                # anomaly_summary; skip them here too so they neither
+                # register an adsorbate nor get indexed below.
+                if reaction not in anomaly_summary:
+                    continue
 
                 adsorbate = find_adsorbate(mlip_result[reaction]["reference"])
                 if adsorbate:
