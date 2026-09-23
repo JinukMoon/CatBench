@@ -18,12 +18,84 @@ from ase.io import read
 from ase.constraints import FixAtoms
 from catbench.utils.io_utils import get_raw_data_directory, get_raw_data_path, save_json
 
-GRAPHQL = "http://api.catalysis-hub.org/graphql"
+GRAPHQL = "https://api.catalysis-hub.org/graphql"
+
+# Preprocessed CatHub datasets published by the CatBench team (same format that
+# cathub_preprocessing() writes). Tried first so most users never need a CatHub
+# API key and never touch CatHub's request limits. Override for testing/mirrors.
+MIRROR_URL = os.environ.get("CATBENCH_MIRROR_URL", "https://catbench.org/benchmark")
+
+CATHUB_KEY_URL = "https://api.catalysis-hub.org/auth/login"
+CATHUB_MAX_PAGE = 200            # server-side per-request row cap
+CATHUB_MIN_INTERVAL = 6.5        # s between requests (CatHub limit: 10/min)
+CATHUB_DEFAULT_BUDGET = 300      # requests per call (CatHub suspends accounts >500/day)
+
+# Key + request bookkeeping for the current download. Kept at module level so that
+# fetch(query) keeps its one-argument signature (scripts monkeypatch it).
+_api_key = None
+_last_request = [0.0]
+_request_count = [0]
+
+
+class CatHubAuthError(RuntimeError):
+    """CatHub rejected the request because of a missing/invalid API key."""
+
+
+class CatHubBudgetError(RuntimeError):
+    """A CatHub download would exceed the request budget (account-suspension guard)."""
+
+
+class MirrorUnavailableError(RuntimeError):
+    """The catbench.org mirror could not be reached (network), as opposed to 'not in mirror'."""
+
+
+def _resolve_api_key(api_key=None):
+    """Explicit argument > CATHUB_API_KEY environment variable. Never logged."""
+    if api_key is not None:
+        if not str(api_key).strip():
+            raise CatHubAuthError("api_key was passed but is empty.")
+        return str(api_key).strip()
+    env = os.environ.get("CATHUB_API_KEY", "").strip()
+    return env or None
+
+
+def _missing_key_message(tag, n_requests=None):
+    need = f" This dataset needs about {n_requests} requests." if n_requests else ""
+    return (
+        f"'{tag}' is not available from the catbench.org mirror, so it must be downloaded "
+        f"from CatHub, which now requires an API key:\n"
+        f"  1) Get a key at {CATHUB_KEY_URL}\n"
+        f"  2) export CATHUB_API_KEY=<your key>   (or pass api_key=... to cathub_preprocessing)\n"
+        f"Note: CatHub allows 10 requests/minute and suspends accounts above 500 requests/day.{need}"
+    )
 
 
 def fetch(query):
-    """Fetch data from CatHub GraphQL API."""
-    resp = requests.get(GRAPHQL, {"query": query}, timeout=120)
+    """Fetch data from the CatHub GraphQL API (rate-limited, key sent as a header)."""
+    wait = CATHUB_MIN_INTERVAL - (time.time() - _last_request[0])
+    if _last_request[0] and wait > 0:
+        time.sleep(wait)
+    headers = {"X-API-Key": _api_key} if _api_key else {}
+    try:
+        # POST + header only: the key never appears in a URL, log line or exception text.
+        # No redirects: never forward the key to an unexpected host.
+        resp = requests.post(GRAPHQL, json={"query": query}, headers=headers,
+                             timeout=120, allow_redirects=False)
+    finally:
+        _last_request[0] = time.time()
+        _request_count[0] += 1
+    if resp.status_code == 401:
+        raise CatHubAuthError(
+            "CatHub rejected the API key (401). It may be missing, mistyped or regenerated; "
+            f"get a new one at {CATHUB_KEY_URL}.")
+    if resp.status_code == 403:
+        raise CatHubAuthError("CatHub refused the request (403). The account may be suspended "
+                              "or not allowed; check the CatHub account page.")
+    if resp.status_code == 429:
+        raise CatHubBudgetError("CatHub rate limit hit (429). Stop and retry later; "
+                                "repeated requests can get the account suspended.")
+    if 300 <= resp.status_code < 400:
+        raise RuntimeError(f"CatHub answered with a redirect ({resp.status_code}); refusing to follow it.")
     resp.raise_for_status()
     payload = resp.json()
     # CatHub returns {"data": null, "errors": [...]} on query errors. Surface a
@@ -34,18 +106,86 @@ def fetch(query):
     return payload["data"]
 
 
-def reactions_from_dataset(pub_id, page_size=40, logger=None):
+def _count_reactions(pub_id):
+    """One small request: server-side totalCount for a publication."""
+    data = fetch(f'{{ reactions(pubId: "{pub_id}", first: 1) {{ totalCount }} }}')
+    return data["reactions"]["totalCount"]
+
+
+def download_from_mirror(tag, dest_path, logger=None):
+    """Download a preprocessed '<tag>_adsorption.json' from the catbench.org mirror.
+
+    Returns a provenance dict on success, None if the mirror does not have the
+    dataset (HTTP 404). Raises MirrorUnavailableError on network failure, so the
+    caller never falls back to CatHub (and spends API requests) silently.
+    """
+    import gzip
+    import hashlib
+    url = f"{MIRROR_URL.rstrip('/')}/{tag}.json.gz"
+    try:
+        resp = requests.get(url, timeout=120)
+    except requests.RequestException as e:
+        raise MirrorUnavailableError(
+            f"Could not reach the catbench.org mirror ({url}): {type(e).__name__}. "
+            f"Check the network, or pass source='cathub' to download from CatHub instead.") from None
+    if resp.status_code == 404:
+        return None
+    if resp.status_code != 200:
+        raise MirrorUnavailableError(
+            f"catbench.org mirror returned HTTP {resp.status_code} for {url}. "
+            f"Retry later, or pass source='cathub' to download from CatHub instead.")
+    try:
+        raw = gzip.decompress(resp.content)
+        data = json.loads(raw)
+    except Exception as e:
+        raise MirrorUnavailableError(f"Mirror file for {tag} is not a valid gzip JSON ({e}).") from None
+    n = sum(1 for k in data if not k.startswith("_"))
+    if n == 0 or not all("raw" in v for k, v in data.items() if not k.startswith("_")):
+        raise MirrorUnavailableError(f"Mirror file for {tag} is not a CatBench adsorption dataset.")
+    tmp = dest_path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(raw)
+    os.replace(tmp, dest_path)
+    prov = {"source": "catbench.org mirror", "url": url, "md5": hashlib.md5(raw).hexdigest(),
+            "bytes": len(raw), "reactions": n, "downloaded": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if logger:
+        logger.info(f"Mirror download: {prov}")
+    return prov
+
+
+def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, request_budget=CATHUB_DEFAULT_BUDGET):
     """
     Download reactions from CatHub dataset.
     
     Args:
         pub_id: Publication ID or dataset tag
-        page_size: Number of reactions per page
+        page_size: Number of reactions per page (CatHub caps it at 200)
         logger: Logger instance for progress tracking
+        request_budget: Maximum CatHub requests this download may use. The request
+            count is computed from totalCount before downloading; if it exceeds the
+            budget the download is refused up front (CatHubBudgetError).
         
     Returns:
         List of reaction data
     """
+    page_size = max(1, min(int(page_size), CATHUB_MAX_PAGE))
+    total_expected = _count_reactions(pub_id)
+    # Measured 2026-09-23: a page that includes structures (InputFile) comes back
+    # with ONE reaction no matter what `first` asks for (without structures a page
+    # holds up to 200). Plan for the worst case: one request per reaction.
+    needed = 1 + total_expected
+    if needed > request_budget:
+        raise CatHubBudgetError(
+            f"Downloading {pub_id} from CatHub needs up to {needed} requests: CatHub returns "
+            f"structures one reaction per request ({total_expected} reactions). That is above "
+            f"the budget of {request_budget}; CatHub suspends accounts above 500 requests/day. "
+            f"Use the catbench.org mirror (source='auto'), or raise request_budget knowingly "
+            f"(at 10 requests/minute this takes about {needed // 10 + 1} minutes).")
+    if logger:
+        logger.info(f"CatHub: {total_expected} reactions, ~{needed} requests planned "
+                    f"(page_size={page_size}, budget={request_budget})")
+    used = 1
+    prev_cursor = None
     reactions = []
     seen_ids = set()
     has_next_page = True
@@ -57,7 +197,10 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
         # Without it, CatHub's default row order is not stable across pages, so
         # paging with `after: endCursor` silently returns some reactions twice and
         # skips an equal number -- yielding non-deterministic, incomplete downloads.
-        data = fetch(
+        if used >= request_budget:
+            raise CatHubBudgetError(f"Request budget ({request_budget}) exhausted while "
+                                    f"downloading {pub_id}; nothing was saved.")
+        query = (
             f"""{{
       reactions(pubId: "{pub_id}", first: {page_size}, after: "{start_cursor}", order: "id") {{
         totalCount
@@ -87,21 +230,27 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
       }}
     }}"""
         )
+        try:
+            data = fetch(query)
+        except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
+            # One retry for transient server/network errors (never for auth/budget).
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is not None and status < 500:
+                raise
+            if logger:
+                logger.warning(f"CatHub request failed ({type(e).__name__}); retrying once.")
+            used += 1
+            data = fetch(query)
+        used += 1
         has_next_page = data["reactions"]["pageInfo"]["hasNextPage"]
         start_cursor = data["reactions"]["pageInfo"]["endCursor"]
         page += 1
 
-        # Log download progress
         total_count = data["reactions"]["totalCount"]
-        downloaded_so_far = page_size * page if page_size * page < total_count else total_count
-
-        if logger:
-            pct = (downloaded_so_far / total_count * 100) if total_count else 0.0
-            logger.info(f"Downloaded {downloaded_so_far}/{total_count} reactions for {pub_id} "
-                       f"({pct:.1f}% complete)")
 
         # Dedup by CatHub reaction id as a safety net against any residual
         # pagination overlap. With `order: "id"` this should never trigger.
+        n_before = len(reactions)
         for edge in data["reactions"]["edges"]:
             node = edge["node"]
             rid = node.get("id")
@@ -110,6 +259,22 @@ def reactions_from_dataset(pub_id, page_size=40, logger=None):
             if rid is not None:
                 seen_ids.add(rid)
             reactions.append(node)
+
+        # 1.1.5: never trust hasNextPage alone. With first=200 CatHub keeps
+        # returning hasNextPage=true and the last page again after everything has
+        # been delivered, which would loop until the request budget (or the
+        # 500/day account limit) is gone. Stop on any sign of completion.
+        new_cursor = data["reactions"]["pageInfo"]["endCursor"]
+        if (len(reactions) >= total_expected
+                or len(reactions) == n_before
+                or new_cursor == prev_cursor):
+            has_next_page = False
+        prev_cursor = new_cursor
+
+        if logger:
+            pct = (len(reactions) / total_count * 100) if total_count else 0.0
+            logger.info(f"Downloaded {len(reactions)}/{total_count} unique reactions for {pub_id} "
+                        f"({pct:.1f}%, request {used})")
 
     # Completeness check: the unique download count must match the server-reported
     # total. A mismatch means the dataset is incomplete (do not trust a cached file
@@ -235,7 +400,8 @@ def _fixed_indices_from_relaxation(slab_atoms, adslab_atoms, adsorbate_indices,
 
 
 def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constraints=True,
-                         infer_fix_when_missing=True, fix_detect_tol=1e-4):
+                         infer_fix_when_missing=True, fix_detect_tol=1e-4,
+                         source="auto", api_key=None, request_budget=CATHUB_DEFAULT_BUDGET):
     """
     Download and preprocess CatHub data for MLIP benchmarking.
     
@@ -268,6 +434,17 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
         adsorbate_integration (dict, optional): Mapping for adsorbate name unification.
                                               Format: {"source_name": "target_name"}
                                               Example: {"OH2": "H2O", "H2O2": "OOH"}
+        source (str): Where to get the data (new in 1.1.5).
+            "auto"   (default) catbench.org mirror first; CatHub only if the mirror
+                     does not have the dataset (needs an API key).
+            "mirror" mirror only; error if the dataset is not there.
+            "cathub" always download from CatHub (needs an API key).
+            The mirror holds datasets preprocessed with the default options, so a
+            call with non-default preprocessing options goes to CatHub.
+        api_key (str, optional): CatHub API key. Falls back to the CATHUB_API_KEY
+            environment variable. Sent only as a request header, never logged.
+        request_budget (int): Maximum CatHub requests per dataset download
+            (default 300; CatHub suspends accounts above 500 requests/day).
                                               
     Raises:
         ValueError: If reaction energy validation fails
@@ -278,12 +455,77 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
         The function automatically handles duplicate reaction names and validates
         reaction stoichiometry. Invalid reactions are filtered out with error messages.
     """
+    global _api_key
+    if source not in ("auto", "mirror", "cathub"):
+        raise ValueError(f"source must be 'auto', 'mirror' or 'cathub', got {source!r}")
     save_directory = get_raw_data_directory()
     os.makedirs(save_directory, exist_ok=True)
     
     # Convert single string to list for uniform processing
     benchmarks = [benchmark] if isinstance(benchmark, str) else benchmark
-    
+
+    # --- 1.1.5: catbench.org mirror first -----------------------------------------
+    default_options = (adsorbate_integration is None and require_constraints is True
+                       and infer_fix_when_missing is True and fix_detect_tol == 1e-4)
+    if isinstance(benchmark, str) and source in ("auto", "mirror"):
+        out_path = get_raw_data_path(benchmark)
+        raw_cache = os.path.join(save_directory, f"{benchmark}.json")
+        if os.path.exists(out_path):
+            print(f"Processed data already exists at {out_path}")
+            return
+        if not os.path.exists(raw_cache):
+            if not default_options:
+                if source == "mirror":
+                    raise ValueError("The mirror only holds datasets preprocessed with the default "
+                                     "options; use source='cathub' for custom options.")
+                print("Non-default preprocessing options: skipping the mirror, using CatHub.")
+            else:
+                mlog = logging.getLogger(f"catbench_{benchmark}_mirror")
+                mlog.setLevel(logging.INFO)
+                mlog.handlers.clear()
+                mh = logging.FileHandler(os.path.join(save_directory, f"{benchmark}_preprocessing.log"),
+                                         mode="w", encoding="utf-8")
+                mh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+                mlog.addHandler(mh)
+                mlog.propagate = False
+                try:
+                    prov = download_from_mirror(benchmark, out_path, logger=mlog)
+                finally:
+                    mlog.handlers.clear()
+                if prov is not None:
+                    print(f"Downloaded {benchmark} from the catbench.org mirror "
+                          f"({prov['reactions']} reactions, md5 {prov['md5']}) -> {out_path}")
+                    return
+                if source == "mirror":
+                    raise FileNotFoundError(f"'{benchmark}' is not in the catbench.org mirror.")
+                print(f"'{benchmark}' is not in the catbench.org mirror; downloading from CatHub.")
+    elif not isinstance(benchmark, str) and source == "mirror":
+        raise ValueError("source='mirror' supports a single dataset tag, not a list.")
+
+    # --- CatHub path: needs an API key if anything must be downloaded ---------------
+    needs_download = any(not os.path.exists(os.path.join(save_directory, f"{b}.json"))
+                         for b in benchmarks)
+    if needs_download and not os.path.exists(get_raw_data_path(
+            benchmark if isinstance(benchmark, str) else "multiple_tag")):
+        key = _resolve_api_key(api_key)
+        if key is None:
+            first_missing = next(b for b in benchmarks
+                                 if not os.path.exists(os.path.join(save_directory, f"{b}.json")))
+            raise CatHubAuthError(_missing_key_message(first_missing))
+        _api_key = key
+    try:
+        return _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,
+                                          require_constraints, infer_fix_when_missing, fix_detect_tol,
+                                          request_budget)
+    finally:
+        _api_key = None
+
+
+def _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,
+                               require_constraints, infer_fix_when_missing, fix_detect_tol,
+                               request_budget):
+    """Download (CatHub) + preprocess. Split out of cathub_preprocessing in 1.1.5."""
+
     # Check if any downloads are needed and setup logging if so
     download_needed = any(not os.path.exists(os.path.join(save_directory, f"{bench}.json")) 
                          for bench in benchmarks)
@@ -326,7 +568,8 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
         # Get reactions for benchmark (preliminary download)
         if not os.path.exists(path_json):
             bench_logger.info(f"Downloading reactions for benchmark: {bench}")
-            raw_reactions = reactions_from_dataset(bench, logger=bench_logger)
+            raw_reactions = reactions_from_dataset(bench, logger=bench_logger,
+                                                   request_budget=request_budget)
             bench_logger.info(f"Download completed for {bench}: {len(raw_reactions)} reactions")
             raw_reactions_json = {"raw_reactions": raw_reactions}
             save_json(raw_reactions_json, path_json, use_numpy_encoder=False)
@@ -690,22 +933,30 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
         print("   Delete the file if you want to reprocess the data.")
 
 
-def download(benchmark_tags):
+def download(benchmark_tags, api_key=None, request_budget=CATHUB_DEFAULT_BUDGET):
     """
     Download raw reaction data from CatHub (without processing).
     
     Args:
         benchmark_tags: Single tag or list of tags
+        api_key: CatHub API key (falls back to CATHUB_API_KEY)
+        request_budget: Maximum CatHub requests per tag
         
     Returns:
         List of raw reaction data
     """
+    global _api_key
     if isinstance(benchmark_tags, str):
         benchmark_tags = [benchmark_tags]
-    
-    all_reactions = []
-    for tag in benchmark_tags:
-        reactions = reactions_from_dataset(tag)
-        all_reactions.extend(reactions)
-    
+    key = _resolve_api_key(api_key)
+    if key is None:
+        raise CatHubAuthError(_missing_key_message(benchmark_tags[0]))
+    _api_key = key
+    try:
+        all_reactions = []
+        for tag in benchmark_tags:
+            reactions = reactions_from_dataset(tag, request_budget=request_budget)
+            all_reactions.extend(reactions)
+    finally:
+        _api_key = None
     return all_reactions 

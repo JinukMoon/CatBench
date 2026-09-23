@@ -658,6 +658,52 @@ class AdsorptionAnalysis:
             "Num_energy_anomaly_shifted": energy_anomaly_count_shifted,
         }
 
+    def _load_mlip_result(self, result_file, mlip_name):
+        """Load a result.json, moving the per-reaction failure record aside.
+
+        Since 1.1.0 AdsorptionCalculation writes failed reactions under "_failures".
+        Every reaction loop below iterates the file's keys, so the record must not
+        stay in the dict (1.1.4 crashed with KeyError: 'final'). It is kept in
+        self._failures for the Coverage sheet and the end-of-run warning.
+        """
+        with open(result_file, "r") as f:
+            mlip_result = json.load(f)
+        if not hasattr(self, "_failures"):
+            self._failures = {}
+            self._settings = {}
+        self._failures[mlip_name] = mlip_result.pop("_failures", {}) or {}
+        self._settings[mlip_name] = mlip_result.get("calculation_settings", {})
+        return mlip_result
+
+    def _coverage_rows(self):
+        """Per-MLIP success/failure counts from the loaded result files."""
+        import collections
+        rows = []
+        for mlip_name in sorted(getattr(self, "_failures", {}), key=str.lower):
+            failures = self._failures[mlip_name]
+            settings = self._settings.get(mlip_name, {})
+            n_ok = len(self._mlip_result_cache.get(mlip_name, {})) or 0
+            if "calculation_settings" in self._mlip_result_cache.get(mlip_name, {}):
+                n_ok -= 1
+            n_fail = len(failures)
+            n_input = settings.get("n_reactions_input") or (n_ok + n_fail)
+            stages = collections.Counter(v.get("stage", "unknown") for v in failures.values())
+            disp = settings.get("dispersion", {})
+            rows.append({
+                "MLIP_name": self._display_mlip_name(mlip_name),
+                "Num_input": n_input,
+                "Num_succeeded": n_ok,
+                "Num_failed": n_fail,
+                "Num_not_run": max(n_input - n_ok - n_fail, 0),
+                "Coverage_pct": round(100.0 * n_ok / n_input, 2) if n_input else None,
+                "Failed_by_stage": "; ".join(f"{k}: {v}" for k, v in stages.most_common()),
+                "catbench_version": settings.get("catbench_version", "unknown"),
+                "dispersion": (disp.get("method", "none") if isinstance(disp, dict) else str(disp)) if disp else "unknown",
+                "device": settings.get("device", {}).get("name", "unknown") if isinstance(settings.get("device"), dict) else "unknown",
+                "input_md5": settings.get("input_md5", "unknown"),
+            })
+        return rows
+
     def _create_excel_output(self, main_data, anomaly_data, MLIPs_data, analysis_adsorbates,
                              main_data_shifted=None, anomaly_data_shifted=None):
         """Create Excel output file."""
@@ -677,6 +723,19 @@ class AdsorptionAnalysis:
 
             if anomaly_data_shifted:
                 self._create_anomaly_sheet(writer, anomaly_data_shifted, sheet_name="anomaly_shifted")
+
+            # 1.1.5: which MLIPs did not compute every reaction (failures used to be
+            # invisible: MAE is over the succeeded subset only).
+            coverage = self._coverage_rows()
+            if coverage:
+                pd.DataFrame(coverage).to_excel(writer, sheet_name="Coverage", index=False)
+                incomplete = [r for r in coverage if r["Num_failed"] or r["Num_not_run"]]
+                if incomplete:
+                    print("\nWARNING: some MLIPs did not compute every reaction; their MAE covers "
+                          "the succeeded reactions only (see the 'Coverage' sheet):")
+                    for r in incomplete:
+                        print(f"  {r['MLIP_name']}: {r['Num_succeeded']}/{r['Num_input']} succeeded, "
+                              f"{r['Num_failed']} failed ({r['Failed_by_stage'] or 'n/a'})")
 
             for mlip_name in sorted(MLIPs_data.keys(), key=str.lower):
                 data_dict = MLIPs_data[mlip_name]
@@ -1143,8 +1202,7 @@ class AdsorptionAnalysis:
                     print(f"  Warning: Result file not found for {mlip_name}")
                     continue
 
-                with open(result_file, "r") as f:
-                    mlip_result = json.load(f)
+                mlip_result = self._load_mlip_result(result_file, mlip_name)
 
                 # Get n_crit_relax
                 n_crit_relax = mlip_result.get("calculation_settings", {}).get("n_crit_relax", 999)
@@ -1514,8 +1572,8 @@ class AdsorptionAnalysis:
             print(f"Processing {self._display_mlip_name(mlip_name)}")
 
             # Load results first
-            with open(f"{self.calculating_path}/{mlip_name}/{mlip_name}_result.json", "r") as f:
-                mlip_result = json.load(f)
+            mlip_result = self._load_mlip_result(
+                f"{self.calculating_path}/{mlip_name}/{mlip_name}_result.json", mlip_name)
 
             # Get n_crit_relax from calculation settings (with fallback to default)
             n_crit_relax = mlip_result.get("calculation_settings", {}).get("n_crit_relax", 999)

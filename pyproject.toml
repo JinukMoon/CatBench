@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "catbench"
-version = "1.1.4"
+dynamic = ["version"]
 description = "CatBench Framework for Benchmarking Machine Learning Interatomic Potentials in Adsorption Energy Predictions for Heterogeneous Catalysis"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -35,6 +35,9 @@ d3 = ["torch>=1.12.0"]
 
 [project.urls]
 Homepage = "https://github.com/JinukMoon/catbench"
+
+[tool.setuptools.dynamic]
+version = {attr = "catbench._version.__version__"}
 
 [tool.setuptools]
 include-package-data = false

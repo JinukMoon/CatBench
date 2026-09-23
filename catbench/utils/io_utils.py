@@ -182,11 +182,8 @@ def get_calculation_settings(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Stamp version + constraint mode. Fixing is always data-defined (stored
     # FixAtoms); the legacy z-coordinate `rate` override was removed in 1.1.1.
-    try:
-        from importlib.metadata import version
-        catbench_version = version("catbench")
-    except Exception:
-        catbench_version = "1.1.2"
+    # Single source of truth (catbench.__version__); no hard-coded fallback here.
+    from catbench import __version__ as catbench_version
     settings["catbench_version"] = catbench_version
     settings["constraint_mode"] = "fixatoms"
 

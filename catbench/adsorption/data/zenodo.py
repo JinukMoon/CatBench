@@ -147,11 +147,23 @@ def _leaderboard_url(name):
 
 
 def _leaderboard_has(name):
+    """True if catbench.org hosts ``name``; False only on a definite "not there" (404).
+
+    1.1.5: a network failure used to return False too, which silently sent
+    get_benchmark on to CatHub (API key, 500 requests/day). Now it raises.
+    """
+    from catbench.adsorption.data.cathub import MirrorUnavailableError
     try:
         r = requests.head(_leaderboard_url(name), timeout=30, allow_redirects=True)
-        return r.status_code == 200
-    except requests.RequestException:
+    except requests.RequestException as e:
+        raise MirrorUnavailableError(
+            f"Could not reach catbench.org ({type(e).__name__}); not falling back to CatHub "
+            f"silently. Check the network, or call cathub_preprocessing(name, source='cathub').") from None
+    if r.status_code == 200:
+        return True
+    if r.status_code == 404:
         return False
+    raise MirrorUnavailableError(f"catbench.org returned HTTP {r.status_code} for {name}; retry later.")
 
 
 def _leaderboard_download(name, target_path):
@@ -202,5 +214,5 @@ def get_benchmark(name, overwrite=False, verify=True):
     # Tier 3: CatHub fallback
     print(f"[get_benchmark] '{name}' -> CatHub (fallback)")
     from catbench.adsorption.data.cathub import cathub_preprocessing
-    cathub_preprocessing(name)
+    cathub_preprocessing(name, source="cathub")   # mirror already checked above
     return target_path

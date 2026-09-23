@@ -145,7 +145,75 @@ class AdsorptionCalculation:
             self.config.get("f_crit_relax"),
             self.config.get("n_crit_relax"),
             self.config.get("damping"),
+            # 1.1.5: D3 on/off (and its parameters) changes every relaxed energy, so a
+            # cache written with a different dispersion setup must not be reused.
+            json.dumps(self._dispersion_info(), sort_keys=True),
         ]
+
+    def _dispersion_info(self):
+        """Dispersion correction actually attached to the calculators (introspected,
+        not inferred from mlip_name). {"method": "none"} when no D3 layer is found."""
+        if getattr(self, "_disp_cache", None) is not None:
+            return self._disp_cache
+        found = []
+        classes = set()
+        for calc in self.calculators:
+            stack = [calc]
+            while stack:
+                c = stack.pop()
+                classes.add(type(c).__name__)
+                subs = getattr(c, "calcs", None) or getattr(getattr(c, "mixer", None), "calcs", None)
+                if subs:
+                    stack.extend(subs)
+                    continue
+                name = type(c).__name__
+                if "D3" in name.upper() or "DFTD" in name.upper():
+                    found.append({
+                        "method": "D3",
+                        "calculator": name,
+                        "damping": getattr(c, "damp_name", getattr(c, "damping", "unknown")),
+                        "functional": getattr(c, "func_name", getattr(c, "xc", "unknown")),
+                        "vdw_cutoff": getattr(c, "rthr", None),
+                        "cn_cutoff": getattr(c, "cnthr", None),
+                    })
+        if found:
+            info = dict(found[0])
+            if any(f != found[0] for f in found):
+                info["warning"] = "calculators differ in dispersion setup"
+        else:
+            info = {"method": "none"}
+        info["calculator_classes"] = sorted(classes)
+        self._disp_cache = info
+        return info
+
+    def _device_info(self):
+        """GPU actually used by this process (CUDA context initialised), else cpu/unknown."""
+        import socket
+        info = {"hostname": socket.gethostname(),
+                "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+                "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
+        try:
+            import sys as _sys
+            torch = _sys.modules.get("torch")
+            if torch is not None and torch.cuda.is_available() and torch.cuda.is_initialized():
+                idx = torch.cuda.current_device()
+                info.update(name=torch.cuda.get_device_name(idx), type="cuda", index=idx)
+            elif torch is not None:
+                info.update(name="cpu (no CUDA context)", type="cpu")
+            else:
+                info.update(name="unknown (torch not loaded)", type="unknown")
+        except Exception as e:
+            info.update(name=f"unknown ({type(e).__name__})", type="unknown")
+        return info
+
+    def _run_metadata(self):
+        """Extra calculation_settings stamps (1.1.5): input identity + real run setup."""
+        meta = {"benchmark": self.benchmark,
+                "mode": self.mode,
+                "dispersion": self._dispersion_info(),
+                "device": self._device_info()}
+        meta.update(getattr(self, "_input_meta", {}))
+        return meta
     
     def run(self):
         """
@@ -170,8 +238,14 @@ class AdsorptionCalculation:
                 f"Please run preprocessing to generate the JSON file."
             )
         
+        import hashlib
         from catbench.utils.data_utils import load_catbench_json
-        return load_catbench_json(path_json)
+        with open(path_json, "rb") as f:
+            md5 = hashlib.md5(f.read()).hexdigest()
+        data = load_catbench_json(path_json)
+        self._input_meta = {"input_file": os.path.basename(path_json), "input_md5": md5,
+                            "n_reactions_input": len(data)}
+        return data
     
     def _setup_directories(self, mode_suffix=""):
         """Setup output directories."""
@@ -192,6 +266,24 @@ class AdsorptionCalculation:
         except FileNotFoundError:
             print("Beginning calculation from scratch.")
             final_result, gas_energies, gas_energies_single = {}, {}, {}
+
+        # 1.1.5: refuse to resume a result written with a different dispersion setup
+        # (mixing D3-on and D3-off reactions in one result file).
+        prev_path = os.path.join(save_directory, f"{self.mlip_name}_result.json")
+        if final_result and os.path.exists(prev_path):
+            try:
+                with open(prev_path) as f:
+                    prev_disp = json.load(f).get("calculation_settings", {}).get("dispersion")
+            except Exception:
+                prev_disp = None
+            cur = {k: v for k, v in self._dispersion_info().items() if k != "calculator_classes"}
+            if prev_disp is not None:
+                prev = {k: v for k, v in prev_disp.items() if k != "calculator_classes"}
+                if prev != cur:
+                    raise RuntimeError(
+                        f"Existing results in {save_directory} were computed with dispersion "
+                        f"{prev}, but this run uses {cur}. Use a different mlip_name (e.g. a "
+                        f"'_D3' suffix) or delete the old results.")
 
         # Structure-reuse cache (slab + adslab + single-point) — restart-safe
         # sibling file, loaded independently of the result file so an interrupted
@@ -252,18 +344,28 @@ class AdsorptionCalculation:
             except Exception as e:
                 print(f"Error occurred while processing {key}: {str(e)}")
                 print("Skipping to next reaction...")
-                failed[key] = {"error": repr(e), "traceback": traceback.format_exc()[-2000:]}
+                failed[key] = {"error": repr(e), "stage": getattr(self, "_stage", "unknown"),
+                               "traceback": traceback.format_exc()[-2000:]}
                 continue
 
         # Final save to ensure all results are saved
         print(f"Final save: {len(final_result)} total calculations")
         self._save_results_basic(save_directory, final_result, gas_energies, gas_energies_single, structure_cache, failed)
 
-        print(f"{len(final_result)} succeeded, {len(failed)} failed")
-        if failed:
-            print(f"Failed reactions: {list(failed.keys())}")
+        self._print_failure_summary(final_result, failed)
         print(f"{self.mlip_name} Benchmarking Finish")
         return save_directory
+
+    def _print_failure_summary(self, final_result, failed):
+        """End-of-run summary. A run with failures still finishes, so say it loudly."""
+        import collections
+        print(f"{len(final_result)} succeeded, {len(failed)} failed")
+        if failed:
+            by_stage = collections.Counter(v.get("stage", "unknown") for v in failed.values())
+            print("WARNING: " + f"{len(failed)} reaction(s) FAILED and are missing from the results "
+                  f"(by stage: {dict(by_stage)}). They are listed under '_failures' in the result file; "
+                  f"analysis reports them in the 'Coverage' sheet.")
+            print(f"Failed reactions: {list(failed.keys())}")
     
     def _process_reaction_basic(self, key, reaction_data, save_directory, gas_energies, gas_energies_single, structure_cache):
         """
@@ -284,6 +386,7 @@ class AdsorptionCalculation:
             raise KeyError(f"Missing 'adsorbate_indices' key in data for reaction {key}. "
                           "Please re-run preprocessing to generate adsorbate indices.")
         adsorbate_indices = reaction_data["adsorbate_indices"]
+        self._stage = "setup"
         
         # Initialize result structure
         result = {
@@ -307,6 +410,7 @@ class AdsorptionCalculation:
         
         for structure in reaction_data["raw"]:
             if "gas" not in str(structure):
+                self._stage = f"single_point:{'slab' if structure == 'star' else 'adslab'}"
                 POSCAR_str = reaction_data["raw"][structure]["atoms"]
                 if structure == "star":
                     # Single-point clean-slab energy is frame-invariant -> cache &
@@ -324,6 +428,7 @@ class AdsorptionCalculation:
                     adslab_energy_single = energy_calculated
                 ads_energy_single += energy_calculated * reaction_data["raw"][structure]["stoi"]
             else:  # Gas molecule - use single point
+                self._stage = f"single_point:gas:{structure}"
                 gas_tag = structure  # Simplified: no suffix for single point
                 if gas_tag in gas_energies_single:
                     ads_energy_single += gas_energies_single[gas_tag] * reaction_data["raw"][structure]["stoi"]
@@ -401,6 +506,7 @@ class AdsorptionCalculation:
 
             for structure in reaction_data["raw"]:
                 if "gas" not in str(structure) and structure == "star":
+                    self._stage = "relax:slab"
                     # Clean slab: relax once per (geometry+fix, seed) and reuse the
                     # result for every frame-equivalent slab (energy + displacement
                     # are frame-invariant -> identical result, pure speedup).
@@ -459,6 +565,7 @@ class AdsorptionCalculation:
                         steps_total_slab += slab_steps
 
                 elif "gas" not in str(structure):  # adslab
+                    self._stage = "relax:adslab"
                     # Relax once per (geometry+fix, adsorbate_indices, seed) and reuse
                     # the result for every identical adslab. Same machinery as the clean
                     # slab; the key also pins adsorbate_indices because the adslab metrics
@@ -510,6 +617,7 @@ class AdsorptionCalculation:
                         adslab_final = CONTCAR_calculated.copy()
 
                 else:  # Gas molecule
+                    self._stage = f"relax:gas:{structure}"
                     gas_tag = f"{structure}_{i}th"
                     if gas_tag in gas_energies:
                         ads_energy_calc += gas_energies[gas_tag] * reaction_data["raw"][structure]["stoi"]
@@ -680,21 +788,21 @@ class AdsorptionCalculation:
             except Exception as e:
                 print(f"Error occurred while processing {key}: {str(e)}")
                 print("Skipping to next reaction...")
-                failed[key] = {"error": repr(e), "traceback": traceback.format_exc()[-2000:]}
+                failed[key] = {"error": repr(e), "stage": getattr(self, "_stage", "unknown"),
+                               "traceback": traceback.format_exc()[-2000:]}
                 continue
 
         # Final save to ensure all results are saved
         print(f"Final save: {len(final_result)} total calculations")
         self._save_results_oc20(save_directory, final_result, failed)
 
-        print(f"{len(final_result)} succeeded, {len(failed)} failed")
-        if failed:
-            print(f"Failed reactions: {list(failed.keys())}")
+        self._print_failure_summary(final_result, failed)
         print(f"{self.mlip_name} Benchmarking Finish")
         return save_directory
     
     def _process_reaction_oc20(self, key, reaction_data, save_directory):
         """Process a single reaction in OC20 mode."""
+        self._stage = "oc20"
         result = {
             "reference": {
                 "ads_eng": reaction_data["ref_ads_eng"]
@@ -825,6 +933,7 @@ class AdsorptionCalculation:
     def _save_results_basic(self, save_directory, final_result, gas_energies, gas_energies_single, structure_cache, failures=None):
         """Save results for basic mode."""
         calculation_settings = get_calculation_settings(self.config)
+        calculation_settings.update(self._run_metadata())
         save_calculation_results(
             save_directory, self.mlip_name,
             final_result, gas_energies, gas_energies_single,
@@ -846,6 +955,7 @@ class AdsorptionCalculation:
     def _save_results_oc20(self, save_directory, final_result, failures=None):
         """Save results for OC20 mode."""
         calculation_settings = get_calculation_settings(self.config)
+        calculation_settings.update(self._run_metadata())
         save_calculation_results(
             save_directory, self.mlip_name,
             final_result, calculation_settings=calculation_settings,

@@ -23,11 +23,8 @@ Example usage:
     >>> from catbench.relative.bulk_formation import BulkFormationCalculation
 """
 
-from importlib.metadata import PackageNotFoundError, version
-
-try:
-    __version__ = version("catbench")
-except PackageNotFoundError:
-    __version__ = "1.1.4"
+# Read from the source tree, not installed metadata: running a checkout with an
+# older catbench installed used to stamp the wrong version into result files.
+from catbench._version import __version__
 
 __all__ = ["__version__"]

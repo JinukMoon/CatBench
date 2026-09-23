@@ -111,18 +111,39 @@ list_zenodo_benchmarks()   # the featured names currently on Zenodo
 ```
 
 For explicit control, the source-specific functions still work directly:
-`zenodo_download(name)` (Zenodo only) and `cathub_preprocessing(name)` (CatHub only).
+`zenodo_download(name)` (Zenodo only) and `cathub_preprocessing(name)`.
+
+If catbench.org cannot be reached (network error), `get_benchmark` stops with an error
+instead of silently falling back to CatHub (1.1.5).
 
 #### Option B: CatHub Database
 
-`get_benchmark` already falls back to CatHub automatically; call it directly to
-force a fresh CatHub download + preprocess:
+`cathub_preprocessing(name)` takes the preprocessed file from the catbench.org mirror
+when it has the dataset (no key needed) and downloads from CatHub only otherwise
+(`source="auto"`, default). `source="mirror"` uses the mirror only, `source="cathub"`
+always downloads from CatHub.
+
+**CatHub API key (required since 2026).** CatHub now answers only requests that carry a
+personal API key. Get one at <https://api.catalysis-hub.org/auth/login>, then either
+
+```bash
+export CATHUB_API_KEY=<your key>
+```
+
+or pass it explicitly (never commit it to a script):
 
 ```python
+import os
 from catbench.adsorption import cathub_preprocessing
 
-cathub_preprocessing("MamunHighT2019")
+cathub_preprocessing("NewDataset2026", source="cathub", api_key=os.environ["CATHUB_API_KEY"])
 ```
+
+**CatHub request limits.** CatHub allows 10 requests/minute and **suspends accounts above
+500 requests/day**, and it returns structures **one reaction per request**. CatBench spaces
+requests 6.5 s apart and refuses, before downloading, any dataset that would need more
+requests than `request_budget` (default 300). Large datasets such as MamunHighT2019
+(88,587 CatHub reactions) cannot be downloaded from CatHub in one day — use the mirror.
 
 Downloads are deterministic (stable `order: "id"` pagination + id-based dedup) and **fixed-atom constraints are handled automatically**: CatHub's deposited `constraints` are kept as-is, and for datasets where CatHub omits them the fixed set is **inferred from geometry** (clean slab vs adslab — atoms that do not move were held fixed) and injected as `FixAtoms`. A genuinely unconstrained slab is left free. So every preprocessed dataset is self-describing and runs correctly out of the box.
 
