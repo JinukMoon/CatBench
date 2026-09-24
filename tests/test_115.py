@@ -19,6 +19,21 @@ from catbench.utils.data_utils import save_catbench_json, load_catbench_json
 FAKE_KEY = "FAKEKEY-do-not-leak-1234567890"
 
 
+@pytest.fixture(autouse=True)
+def _isolated_state(tmp_path, monkeypatch):
+    """Never touch the real ~/.catbench request log; no real pacing in tests."""
+    monkeypatch.setenv("CATBENCH_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(ch, "CATHUB_MIN_INTERVAL", 0)
+
+
+def _counting(fn):
+    """Fake fetch that counts like the real one (the budget is measured by _request_count)."""
+    def wrapped(query):
+        ch._request_count[0] += 1
+        return fn(query)
+    return wrapped
+
+
 def _fixed(atoms):
     return sorted(int(i) for c in atoms.constraints if isinstance(c, FixAtoms) for i in c.get_indices())
 
@@ -150,7 +165,7 @@ def test_budget_refused_before_download(monkeypatch):
         calls.append(query)
         return {"reactions": {"totalCount": 88587}}
 
-    monkeypatch.setattr(ch, "fetch", fake_fetch)
+    monkeypatch.setattr(ch, "fetch", _counting(fake_fetch))
     with pytest.raises(ch.CatHubBudgetError) as e:
         ch.reactions_from_dataset("MamunHighT2019", request_budget=300)
     assert len(calls) == 1          # only the totalCount probe was spent
@@ -172,7 +187,7 @@ def test_pagination_stops_even_if_server_keeps_saying_next_page(monkeypatch):
         return {"reactions": {"totalCount": 325, "edges": edges,
                               "pageInfo": {"hasNextPage": True, "endCursor": "c%d" % min(len(calls), 3)}}}
 
-    monkeypatch.setattr(ch, "fetch", fake_fetch)
+    monkeypatch.setattr(ch, "fetch", _counting(fake_fetch))
     got = ch.reactions_from_dataset("ComerGeneralized2024", request_budget=400)
     assert len(got) == 325
     assert len(calls) == 3          # probe + 2 pages, not a loop to the budget
@@ -255,3 +270,102 @@ def test_get_benchmark_network_error_does_not_fall_back_to_cathub(tmp_path, monk
     monkeypatch.setattr(ch, "cathub_preprocessing", lambda *a, **k: pytest.fail("silent CatHub fallback"))
     with pytest.raises(ch.MirrorUnavailableError):
         zmod.get_benchmark("SomeSet2024")
+
+
+
+# --- review fixes (1.1.5 round 2) ----------------------------------------------------
+def test_direct_fetch_uses_env_key(monkeypatch):
+    """Surface-energy preprocessing and direct callers go through fetch() without
+    cathub_preprocessing; CATHUB_API_KEY must still be sent."""
+    seen = {}
+    monkeypatch.setenv("CATHUB_API_KEY", FAKE_KEY)
+    monkeypatch.setattr(ch, "_api_key", None)
+    monkeypatch.setattr(ch.requests, "post", lambda url, json=None, headers=None, **k:
+                        seen.update(h=headers) or _Resp(200, {"data": {"ok": 1}}))
+    assert ch.fetch("{ x }") == {"ok": 1}
+    assert seen["h"] == {"X-API-Key": FAKE_KEY}
+
+
+def test_old_style_monkeypatch_of_reactions_from_dataset_still_works(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CATHUB_API_KEY", FAKE_KEY)
+    raw = json.load(open("/home/jumoon/catbench_management/catbench_test/cathub_test_remaining/"
+                         "raw_data/GauthierSolvation2017.json"))["raw_reactions"] \
+        if os.path.exists("/home/jumoon/catbench_management/catbench_test/cathub_test_remaining/"
+                          "raw_data/GauthierSolvation2017.json") else None
+    if raw is None:
+        pytest.skip("no cached CatHub raw file on this machine")
+    # the exact signature run_mamun.py uses: no **kwargs
+    monkeypatch.setattr(ch, "reactions_from_dataset", lambda p, page_size=50, logger=None: raw)
+    ch.cathub_preprocessing("GauthierSolvation2017", source="cathub")
+    assert (tmp_path / "raw_data" / "GauthierSolvation2017_adsorption.json").exists()
+
+
+def test_budget_is_shared_across_a_list_of_tags(monkeypatch):
+    def fake(query):
+        if "first: 1)" in query:
+            return {"reactions": {"totalCount": 200}}
+        return {"reactions": {"totalCount": 200, "edges": [{"node": {"id": "x%d" % ch._request_count[0]}}],
+                              "pageInfo": {"hasNextPage": True, "endCursor": "c%d" % ch._request_count[0]}}}
+
+    monkeypatch.setattr(ch, "fetch", _counting(fake))
+    monkeypatch.setenv("CATHUB_API_KEY", FAKE_KEY)
+    with pytest.raises(ch.CatHubBudgetError):
+        ch.download(["A2026", "B2026"], request_budget=300)   # 201 + 201 > 300
+
+
+def test_daily_limit_is_account_wide(tmp_path, monkeypatch):
+    st = tmp_path / "state"
+    st.mkdir(exist_ok=True)
+    import time as _t
+    (st / "cathub_requests.json").write_text(json.dumps({"date": _t.strftime("%Y-%m-%d"),
+                                                         "count": 440, "last": 0}))
+    monkeypatch.setattr(ch, "fetch", _counting(lambda q: {"reactions": {"totalCount": 50}}))
+    with pytest.raises(ch.CatHubBudgetError) as e:
+        ch.reactions_from_dataset("X2026", request_budget=300)   # 50 > 450 - 440
+    assert "left today" in str(e.value)
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: pytest.fail("over the daily limit"))
+    (st / "cathub_requests.json").write_text(json.dumps({"date": _t.strftime("%Y-%m-%d"),
+                                                         "count": 450, "last": 0}))
+    with pytest.raises(ch.CatHubBudgetError):
+        ch._reserve_request()
+
+
+def test_incomplete_download_is_not_returned(monkeypatch):
+    def fake(query):
+        if "first: 1)" in query:
+            return {"reactions": {"totalCount": 3}}
+        return {"reactions": {"totalCount": 3, "edges": [{"node": {"id": "only-one"}}],
+                              "pageInfo": {"hasNextPage": True, "endCursor": "same"}}}
+
+    monkeypatch.setattr(ch, "fetch", _counting(fake))
+    with pytest.raises(RuntimeError, match="incomplete"):
+        ch.reactions_from_dataset("X2026", request_budget=20)
+
+
+def test_resume_keeps_pre_115_structure_cache(tmp_path):
+    from catbench.adsorption import AdsorptionCalculation
+    calc = AdsorptionCalculation([EMT()], mlip_name="M", benchmark="B")
+    d = tmp_path / "result" / "M"
+    d.mkdir(parents=True)
+    old_sig = calc._relax_sig()[:4]
+    (d / "M_structure_cache.json").write_text(json.dumps({"__relax_config__": old_sig, "k": 1}))
+    *_, cache = calc._load_existing_results(str(d))
+    assert cache.get("k") == 1                      # 1.1.4 cache reused, not discarded
+    d3 = AdsorptionCalculation([SumCalculator([EMT(), D3Calculator()])], mlip_name="M", benchmark="B")
+    *_, cache = d3._load_existing_results(str(d))
+    assert cache == {}                              # but never for a D3 run
+
+
+def test_probe_retries_once_on_server_error(monkeypatch):
+    import requests
+    calls = []
+
+    def flaky(query):
+        calls.append(query)
+        if len(calls) == 1:
+            raise requests.HTTPError("500", response=_Resp(500))
+        return {"reactions": {"totalCount": 7}}
+
+    monkeypatch.setattr(ch, "fetch", flaky)
+    assert ch._count_reactions("X2026") == 7 and len(calls) == 2

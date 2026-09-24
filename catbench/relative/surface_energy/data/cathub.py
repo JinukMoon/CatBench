@@ -14,11 +14,13 @@ from collections import Counter
 from ase import Atoms
 from ase.io import read
 
-from catbench.adsorption.data.cathub import reactions_from_dataset, aseify_reactions
+from catbench.adsorption.data.cathub import (reactions_from_dataset, aseify_reactions,
+                                             _cathub_session, CATHUB_DEFAULT_BUDGET)
 from catbench.utils.data_utils import save_catbench_json
 
 
-def surface_energy_cathub_preprocessing(benchmark, save_directory="raw_data"):
+def surface_energy_cathub_preprocessing(benchmark, save_directory="raw_data", api_key=None,
+                                        request_budget=CATHUB_DEFAULT_BUDGET):
     """
     Download and preprocess CatHub data for surface energy benchmarking.
     
@@ -37,6 +39,8 @@ def surface_energy_cathub_preprocessing(benchmark, save_directory="raw_data"):
     Args:
         benchmark (str): CatHub benchmark tag (e.g., "AraComputational2022")
         save_directory (str, optional): Directory to save output files. Default: "raw_data"
+        api_key (str, optional): CatHub API key; falls back to CATHUB_API_KEY (1.1.5).
+        request_budget (int, optional): Maximum CatHub requests for the download (1.1.5).
         
     Output Files:
         - {benchmark}_surface_energy.json: Processed surface energy data
@@ -71,7 +75,9 @@ def surface_energy_cathub_preprocessing(benchmark, save_directory="raw_data"):
     json_path = os.path.join(save_directory, f"{benchmark}.json")
     if not os.path.exists(json_path):
         logger.info("Downloading CatHub data...")
-        raw_reactions = reactions_from_dataset(benchmark, logger=logger)
+        # 1.1.5: CatHub needs an API key (api_key= or CATHUB_API_KEY) and a request budget.
+        with _cathub_session(api_key, request_budget, tag=benchmark):
+            raw_reactions = reactions_from_dataset(benchmark, logger=logger)
         # Save to JSON in the same format as cathub_preprocessing
         raw_reactions_json = {"raw_reactions": raw_reactions}
         with open(json_path, 'w') as f:

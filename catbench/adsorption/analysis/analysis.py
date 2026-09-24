@@ -675,6 +675,19 @@ class AdsorptionAnalysis:
         self._settings[mlip_name] = mlip_result.get("calculation_settings", {})
         return mlip_result
 
+    def _raw_reaction_count(self):
+        """Number of reactions in raw_data/*_adsorption.json next to result/ (None if unclear)."""
+        import glob
+        base = os.path.dirname(os.path.abspath(self.calculating_path))
+        files = glob.glob(os.path.join(base, "raw_data", "*_adsorption.json"))
+        if len(files) != 1:
+            return None
+        try:
+            with open(files[0]) as f:
+                return sum(1 for k in json.load(f) if not k.startswith("_"))
+        except Exception:
+            return None
+
     def _coverage_rows(self):
         """Per-MLIP success/failure counts from the loaded result files."""
         import collections
@@ -686,7 +699,9 @@ class AdsorptionAnalysis:
             if "calculation_settings" in self._mlip_result_cache.get(mlip_name, {}):
                 n_ok -= 1
             n_fail = len(failures)
-            n_input = settings.get("n_reactions_input") or (n_ok + n_fail)
+            # Pre-1.1.5 results have no n_reactions_input stamp: count the dataset
+            # file itself, so unfinished old runs do not look complete.
+            n_input = settings.get("n_reactions_input") or self._raw_reaction_count() or (n_ok + n_fail)
             stages = collections.Counter(v.get("stage", "unknown") for v in failures.values())
             disp = settings.get("dispersion", {})
             rows.append({
@@ -729,6 +744,10 @@ class AdsorptionAnalysis:
             coverage = self._coverage_rows()
             if coverage:
                 pd.DataFrame(coverage).to_excel(writer, sheet_name="Coverage", index=False)
+                writer.sheets["Coverage"].write(
+                    len(coverage) + 2, 0,
+                    "Num_succeeded counts every computed reaction, including any later excluded "
+                    "by energy_cutoff, so it can exceed Num_total in MLIP_Data.")
                 incomplete = [r for r in coverage if r["Num_failed"] or r["Num_not_run"]]
                 if incomplete:
                     print("\nWARNING: some MLIPs did not compute every reaction; their MAE covers "

@@ -29,12 +29,76 @@ CATHUB_KEY_URL = "https://api.catalysis-hub.org/auth/login"
 CATHUB_MAX_PAGE = 200            # server-side per-request row cap
 CATHUB_MIN_INTERVAL = 6.5        # s between requests (CatHub limit: 10/min)
 CATHUB_DEFAULT_BUDGET = 300      # requests per call (CatHub suspends accounts >500/day)
+CATHUB_DAILY_LIMIT = int(os.environ.get("CATHUB_DAILY_LIMIT", "450"))  # all processes, per day
 
 # Key + request bookkeeping for the current download. Kept at module level so that
-# fetch(query) keeps its one-argument signature (scripts monkeypatch it).
+# fetch(query) and reactions_from_dataset(pub_id, ...) keep their signatures
+# (scripts monkeypatch them).
 _api_key = None
 _last_request = [0.0]
 _request_count = [0]
+_call_budget = [None]            # budget of the active cathub call (None = none active)
+_call_start = [0]                # _request_count at the start of that call
+
+
+def _state_path():
+    d = os.environ.get("CATBENCH_STATE_DIR", os.path.join(os.path.expanduser("~"), ".catbench"))
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "cathub_requests.json")
+
+
+def _read_state(f):
+    f.seek(0)
+    try:
+        st = json.loads(f.read() or "{}")
+    except ValueError:
+        st = {}
+    today = time.strftime("%Y-%m-%d")
+    if st.get("date") != today:
+        st = {"date": today, "count": 0, "last": st.get("last", 0.0)}
+    return st
+
+
+def daily_requests_used():
+    """CatHub requests made today by every catbench process of this user."""
+    try:
+        with open(_state_path(), "a+") as f:
+            return _read_state(f)["count"]
+    except OSError:
+        return _request_count[0]
+
+
+def _reserve_request():
+    """Account-wide pacing: >= CATHUB_MIN_INTERVAL between requests and at most
+    CATHUB_DAILY_LIMIT per day across ALL local processes (file lock under
+    ~/.catbench), since CatHub's limits are per account, not per process."""
+    try:
+        import fcntl
+    except ImportError:          # no flock (Windows): per-process pacing only
+        wait = CATHUB_MIN_INTERVAL - (time.time() - _last_request[0])
+        if _last_request[0] and wait > 0:
+            time.sleep(wait)
+        return
+    with open(_state_path(), "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            st = _read_state(f)
+            if st["count"] >= CATHUB_DAILY_LIMIT:
+                raise CatHubBudgetError(
+                    f"{st['count']} CatHub requests already made today by catbench on this account "
+                    f"(local limit {CATHUB_DAILY_LIMIT}; CatHub suspends accounts above 500/day). "
+                    f"Try again tomorrow.")
+            wait = CATHUB_MIN_INTERVAL - (time.time() - float(st.get("last", 0.0)))
+            if wait > 0:
+                time.sleep(wait)
+            st["count"] += 1
+            st["last"] = time.time()
+            f.seek(0)
+            f.truncate()
+            f.write(json.dumps(st))
+            f.flush()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 class CatHubAuthError(RuntimeError):
@@ -70,12 +134,36 @@ def _missing_key_message(tag, n_requests=None):
     )
 
 
+class _cathub_session:
+    """Set key + call-wide request budget for one public download call, restore after."""
+
+    def __init__(self, api_key=None, request_budget=CATHUB_DEFAULT_BUDGET, tag=None):
+        key = _resolve_api_key(api_key)
+        if key is None:
+            raise CatHubAuthError(_missing_key_message(tag or "this dataset"))
+        self.key, self.budget = key, request_budget
+
+    def __enter__(self):
+        global _api_key
+        self.saved = (_api_key, _call_budget[0], _call_start[0])
+        _api_key = self.key
+        _call_budget[0], _call_start[0] = self.budget, _request_count[0]
+        return self
+
+    def __exit__(self, *exc):
+        global _api_key
+        _api_key, _call_budget[0], _call_start[0] = self.saved
+        return False
+
+
 def fetch(query):
-    """Fetch data from the CatHub GraphQL API (rate-limited, key sent as a header)."""
-    wait = CATHUB_MIN_INTERVAL - (time.time() - _last_request[0])
-    if _last_request[0] and wait > 0:
-        time.sleep(wait)
-    headers = {"X-API-Key": _api_key} if _api_key else {}
+    """Fetch data from the CatHub GraphQL API (rate-limited, key sent as a header).
+
+    The key comes from the active call (api_key=...) or CATHUB_API_KEY, so direct
+    callers of reactions_from_dataset()/fetch() authenticate too."""
+    key = _api_key or _resolve_api_key()
+    _reserve_request()
+    headers = {"X-API-Key": key} if key else {}
     try:
         # POST + header only: the key never appears in a URL, log line or exception text.
         # No redirects: never forward the key to an unexpected host.
@@ -106,9 +194,24 @@ def fetch(query):
     return payload["data"]
 
 
-def _count_reactions(pub_id):
+def _fetch_retry_once(query, logger=None):
+    """fetch() with ONE retry for transient server/network errors (5xx, timeout,
+    connection). Auth, rate-limit and budget errors are never retried."""
+    try:
+        return fetch(query)
+    except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status is not None and status < 500:
+            raise
+        if logger:
+            logger.warning(f"CatHub request failed ({type(e).__name__}); retrying once.")
+        time.sleep(CATHUB_MIN_INTERVAL)
+        return fetch(query)
+
+
+def _count_reactions(pub_id, logger=None):
     """One small request: server-side totalCount for a publication."""
-    data = fetch(f'{{ reactions(pubId: "{pub_id}", first: 1) {{ totalCount }} }}')
+    data = _fetch_retry_once(f'{{ reactions(pubId: "{pub_id}", first: 1) {{ totalCount }} }}', logger)
     return data["reactions"]["totalCount"]
 
 
@@ -139,10 +242,13 @@ def download_from_mirror(tag, dest_path, logger=None):
         data = json.loads(raw)
     except Exception as e:
         raise MirrorUnavailableError(f"Mirror file for {tag} is not a valid gzip JSON ({e}).") from None
-    n = sum(1 for k in data if not k.startswith("_"))
-    if n == 0 or not all("raw" in v for k, v in data.items() if not k.startswith("_")):
+    if not isinstance(data, dict):
         raise MirrorUnavailableError(f"Mirror file for {tag} is not a CatBench adsorption dataset.")
-    tmp = dest_path + ".tmp"
+    n = sum(1 for k in data if not k.startswith("_"))
+    if n == 0 or not all(isinstance(v, dict) and "raw" in v
+                         for k, v in data.items() if not k.startswith("_")):
+        raise MirrorUnavailableError(f"Mirror file for {tag} is not a CatBench adsorption dataset.")
+    tmp = f"{dest_path}.tmp{os.getpid()}"      # per process: parallel jobs must not share it
     with open(tmp, "wb") as f:
         f.write(raw)
     os.replace(tmp, dest_path)
@@ -153,7 +259,7 @@ def download_from_mirror(tag, dest_path, logger=None):
     return prov
 
 
-def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, request_budget=CATHUB_DEFAULT_BUDGET):
+def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, request_budget=None):
     """
     Download reactions from CatHub dataset.
     
@@ -161,15 +267,24 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
         pub_id: Publication ID or dataset tag
         page_size: Number of reactions per page (CatHub caps it at 200)
         logger: Logger instance for progress tracking
-        request_budget: Maximum CatHub requests this download may use. The request
-            count is computed from totalCount before downloading; if it exceeds the
-            budget the download is refused up front (CatHubBudgetError).
+        request_budget: Maximum CatHub requests this download may use. Default: what
+            is left of the active call's budget (cathub_preprocessing(request_budget=...)),
+            else CATHUB_DEFAULT_BUDGET. Checked against totalCount before downloading
+            and against today's account-wide usage; refused up front if too large.
         
     Returns:
         List of reaction data
     """
     page_size = max(1, min(int(page_size), CATHUB_MAX_PAGE))
-    total_expected = _count_reactions(pub_id)
+    if request_budget is None:
+        request_budget = (_call_budget[0] - (_request_count[0] - _call_start[0])
+                          if _call_budget[0] is not None else CATHUB_DEFAULT_BUDGET)
+    start_count = _request_count[0]
+
+    def used():
+        return _request_count[0] - start_count
+
+    total_expected = _count_reactions(pub_id, logger)
     # Measured 2026-09-23: a page that includes structures (InputFile) comes back
     # with ONE reaction no matter what `first` asks for (without structures a page
     # holds up to 200). Plan for the worst case: one request per reaction.
@@ -181,10 +296,15 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
             f"the budget of {request_budget}; CatHub suspends accounts above 500 requests/day. "
             f"Use the catbench.org mirror (source='auto'), or raise request_budget knowingly "
             f"(at 10 requests/minute this takes about {needed // 10 + 1} minutes).")
+    left_today = CATHUB_DAILY_LIMIT - daily_requests_used()
+    if needed - 1 > left_today:
+        raise CatHubBudgetError(
+            f"Downloading {pub_id} needs up to {needed - 1} more CatHub requests but only "
+            f"{left_today} are left today (local limit {CATHUB_DAILY_LIMIT}/day across all "
+            f"catbench processes; CatHub suspends accounts above 500/day). Try again tomorrow.")
     if logger:
         logger.info(f"CatHub: {total_expected} reactions, ~{needed} requests planned "
                     f"(page_size={page_size}, budget={request_budget})")
-    used = 1
     prev_cursor = None
     reactions = []
     seen_ids = set()
@@ -197,7 +317,7 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
         # Without it, CatHub's default row order is not stable across pages, so
         # paging with `after: endCursor` silently returns some reactions twice and
         # skips an equal number -- yielding non-deterministic, incomplete downloads.
-        if used >= request_budget:
+        if used() >= request_budget:
             raise CatHubBudgetError(f"Request budget ({request_budget}) exhausted while "
                                     f"downloading {pub_id}; nothing was saved.")
         query = (
@@ -233,15 +353,15 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
         try:
             data = fetch(query)
         except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
-            # One retry for transient server/network errors (never for auth/budget).
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status is not None and status < 500:
                 raise
+            if used() >= request_budget:
+                raise CatHubBudgetError(f"Request budget ({request_budget}) exhausted while "
+                                        f"downloading {pub_id}; nothing was saved.") from None
             if logger:
                 logger.warning(f"CatHub request failed ({type(e).__name__}); retrying once.")
-            used += 1
-            data = fetch(query)
-        used += 1
+            data = fetch(query)   # one retry for transient server/network errors
         has_next_page = data["reactions"]["pageInfo"]["hasNextPage"]
         start_cursor = data["reactions"]["pageInfo"]["endCursor"]
         page += 1
@@ -274,18 +394,19 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
         if logger:
             pct = (len(reactions) / total_count * 100) if total_count else 0.0
             logger.info(f"Downloaded {len(reactions)}/{total_count} unique reactions for {pub_id} "
-                        f"({pct:.1f}%, request {used})")
+                        f"({pct:.1f}%, request {used()})")
 
     # Completeness check: the unique download count must match the server-reported
     # total. A mismatch means the dataset is incomplete (do not trust a cached file
     # that fails this check -- delete and re-download).
+    # 1.1.5: raise instead of warning, so an incomplete download is never saved as the
+    # raw cache and silently reused by later runs.
     if total_count is not None and len(reactions) != total_count:
         msg = (f"Downloaded {len(reactions)} unique reactions but CatHub reports "
-               f"totalCount={total_count} for {pub_id}; dataset may be incomplete.")
+               f"totalCount={total_count} for {pub_id}; not saving an incomplete dataset.")
         if logger:
-            logger.warning(msg)
-        else:
-            print(f"WARNING: {msg}")
+            logger.error(msg)
+        raise RuntimeError(msg)
 
     return reactions
 
@@ -455,7 +576,6 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
         The function automatically handles duplicate reaction names and validates
         reaction stoichiometry. Invalid reactions are filtered out with error messages.
     """
-    global _api_key
     if source not in ("auto", "mirror", "cathub"):
         raise ValueError(f"source must be 'auto', 'mirror' or 'cathub', got {source!r}")
     save_directory = get_raw_data_directory()
@@ -503,27 +623,21 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
         raise ValueError("source='mirror' supports a single dataset tag, not a list.")
 
     # --- CatHub path: needs an API key if anything must be downloaded ---------------
-    needs_download = any(not os.path.exists(os.path.join(save_directory, f"{b}.json"))
-                         for b in benchmarks)
-    if needs_download and not os.path.exists(get_raw_data_path(
-            benchmark if isinstance(benchmark, str) else "multiple_tag")):
-        key = _resolve_api_key(api_key)
-        if key is None:
-            first_missing = next(b for b in benchmarks
-                                 if not os.path.exists(os.path.join(save_directory, f"{b}.json")))
-            raise CatHubAuthError(_missing_key_message(first_missing))
-        _api_key = key
-    try:
-        return _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,
-                                          require_constraints, infer_fix_when_missing, fix_detect_tol,
-                                          request_budget)
-    finally:
-        _api_key = None
+    # A list of tags is always built from CatHub raw data (the mirror holds
+    # per-dataset processed files, which are not merged here).
+    missing = [b for b in benchmarks if not os.path.exists(os.path.join(save_directory, f"{b}.json"))]
+    out_exists = os.path.exists(get_raw_data_path(
+        benchmark if isinstance(benchmark, str) else "multiple_tag"))
+    if missing and not out_exists:
+        with _cathub_session(api_key, request_budget, tag=missing[0]):
+            return _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,
+                                              require_constraints, infer_fix_when_missing, fix_detect_tol)
+    return _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,
+                                      require_constraints, infer_fix_when_missing, fix_detect_tol)
 
 
 def _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,
-                               require_constraints, infer_fix_when_missing, fix_detect_tol,
-                               request_budget):
+                               require_constraints, infer_fix_when_missing, fix_detect_tol):
     """Download (CatHub) + preprocess. Split out of cathub_preprocessing in 1.1.5."""
 
     # Check if any downloads are needed and setup logging if so
@@ -568,8 +682,9 @@ def _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_
         # Get reactions for benchmark (preliminary download)
         if not os.path.exists(path_json):
             bench_logger.info(f"Downloading reactions for benchmark: {bench}")
-            raw_reactions = reactions_from_dataset(bench, logger=bench_logger,
-                                                   request_budget=request_budget)
+            # Budget comes from the active _cathub_session (not a keyword), so scripts
+            # that monkeypatch reactions_from_dataset(pub_id, page_size, logger) still work.
+            raw_reactions = reactions_from_dataset(bench, logger=bench_logger)
             bench_logger.info(f"Download completed for {bench}: {len(raw_reactions)} reactions")
             raw_reactions_json = {"raw_reactions": raw_reactions}
             save_json(raw_reactions_json, path_json, use_numpy_encoder=False)
@@ -945,18 +1060,10 @@ def download(benchmark_tags, api_key=None, request_budget=CATHUB_DEFAULT_BUDGET)
     Returns:
         List of raw reaction data
     """
-    global _api_key
     if isinstance(benchmark_tags, str):
         benchmark_tags = [benchmark_tags]
-    key = _resolve_api_key(api_key)
-    if key is None:
-        raise CatHubAuthError(_missing_key_message(benchmark_tags[0]))
-    _api_key = key
-    try:
+    with _cathub_session(api_key, request_budget, tag=benchmark_tags[0]):
         all_reactions = []
         for tag in benchmark_tags:
-            reactions = reactions_from_dataset(tag, request_budget=request_budget)
-            all_reactions.extend(reactions)
-    finally:
-        _api_key = None
+            all_reactions.extend(reactions_from_dataset(tag))
     return all_reactions 

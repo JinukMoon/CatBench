@@ -192,18 +192,50 @@ class AdsorptionCalculation:
         info = {"hostname": socket.gethostname(),
                 "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
                 "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
+        import sys as _sys
+        # Ask each framework that is actually loaded, then fall back to nvidia-smi for
+        # the GPU(s) this process was given. "source" says which answer was used.
         try:
-            import sys as _sys
             torch = _sys.modules.get("torch")
             if torch is not None and torch.cuda.is_available() and torch.cuda.is_initialized():
                 idx = torch.cuda.current_device()
-                info.update(name=torch.cuda.get_device_name(idx), type="cuda", index=idx)
-            elif torch is not None:
-                info.update(name="cpu (no CUDA context)", type="cpu")
-            else:
-                info.update(name="unknown (torch not loaded)", type="unknown")
-        except Exception as e:
-            info.update(name=f"unknown ({type(e).__name__})", type="unknown")
+                info.update(name=torch.cuda.get_device_name(idx), type="cuda", source="torch")
+                return info
+        except Exception:
+            pass
+        try:
+            tf = _sys.modules.get("tensorflow")
+            if tf is not None:
+                gpus = tf.config.list_physical_devices("GPU")
+                if gpus:
+                    det = tf.config.experimental.get_device_details(gpus[0])
+                    info.update(name=det.get("device_name", "GPU (tensorflow)"), type="cuda",
+                                source="tensorflow")
+                    return info
+        except Exception:
+            pass
+        try:
+            jax = _sys.modules.get("jax")
+            if jax is not None:
+                devs = [d for d in jax.devices() if d.platform == "gpu"]
+                if devs:
+                    info.update(name=getattr(devs[0], "device_kind", "GPU (jax)"), type="cuda",
+                                source="jax")
+                    return info
+        except Exception:
+            pass
+        try:
+            import subprocess
+            out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                 capture_output=True, text=True, timeout=20).stdout.strip().splitlines()
+            if out:
+                # nvidia-smi honours CUDA_VISIBLE_DEVICES, so these are this job's GPUs
+                info.update(name=out[0].strip(), type="cuda", source="nvidia-smi",
+                            n_visible=len(out))
+                return info
+        except Exception:
+            pass
+        info.update(name="unknown (no GPU found)", type="unknown", source="none")
         return info
 
     def _run_metadata(self):
@@ -299,7 +331,16 @@ class AdsorptionCalculation:
             # Cached relaxations are valid only for the settings that produced them.
             # If the run's relaxation settings changed, discard the cache so
             # structures are re-relaxed instead of silently reusing stale results.
-            if structure_cache.get("__relax_config__") != self._relax_sig():
+            stored = structure_cache.get("__relax_config__")
+            current = self._relax_sig()
+            # Caches written by <=1.1.4 carry the 4-item signature without the
+            # dispersion entry. They were written without catbench-attached D3 only if
+            # the run had none, so keep them when this run has none either (resuming
+            # an interrupted 1.1.4 run must not re-relax every slab).
+            if (isinstance(stored, list) and len(stored) == 4 and stored == current[:4]
+                    and self._dispersion_info().get("method") == "none"):
+                stored = current
+            if stored != current:
                 if structure_cache:
                     print("Relaxation settings changed since the structure cache "
                           "was written; discarding cache and recomputing.")
