@@ -676,7 +676,14 @@ class AdsorptionAnalysis:
         return mlip_result
 
     def _raw_reaction_count(self):
-        """Number of reactions in raw_data/*_adsorption.json next to result/ (None if unclear)."""
+        """Number of reactions in raw_data/*_adsorption.json next to result/ (None if unclear).
+        Read once per analysis (the file can be hundreds of MB)."""
+        if hasattr(self, "_raw_count_cache"):
+            return self._raw_count_cache
+        self._raw_count_cache = self._read_raw_reaction_count()
+        return self._raw_count_cache
+
+    def _read_raw_reaction_count(self):
         import glob
         base = os.path.dirname(os.path.abspath(self.calculating_path))
         files = glob.glob(os.path.join(base, "raw_data", "*_adsorption.json"))

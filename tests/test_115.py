@@ -289,12 +289,8 @@ def test_direct_fetch_uses_env_key(monkeypatch):
 def test_old_style_monkeypatch_of_reactions_from_dataset_still_works(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CATHUB_API_KEY", FAKE_KEY)
-    raw = json.load(open("/home/jumoon/catbench_management/catbench_test/cathub_test_remaining/"
-                         "raw_data/GauthierSolvation2017.json"))["raw_reactions"] \
-        if os.path.exists("/home/jumoon/catbench_management/catbench_test/cathub_test_remaining/"
-                          "raw_data/GauthierSolvation2017.json") else None
-    if raw is None:
-        pytest.skip("no cached CatHub raw file on this machine")
+    fixture = os.path.join(os.path.dirname(__file__), "data", "cathub_raw_GauthierSolvation2017.json")
+    raw = json.load(open(fixture))["raw_reactions"]
     # the exact signature run_mamun.py uses: no **kwargs
     monkeypatch.setattr(ch, "reactions_from_dataset", lambda p, page_size=50, logger=None: raw)
     ch.cathub_preprocessing("GauthierSolvation2017", source="cathub")
@@ -314,21 +310,63 @@ def test_budget_is_shared_across_a_list_of_tags(monkeypatch):
         ch.download(["A2026", "B2026"], request_budget=300)   # 201 + 201 > 300
 
 
-def test_daily_limit_is_account_wide(tmp_path, monkeypatch):
+def _write_state(tmp_path, n):
+    import time as _t
     st = tmp_path / "state"
     st.mkdir(exist_ok=True)
-    import time as _t
-    (st / "cathub_requests.json").write_text(json.dumps({"date": _t.strftime("%Y-%m-%d"),
-                                                         "count": 440, "last": 0}))
+    now = _t.time()
+    (st / "cathub_requests.json").write_text(json.dumps({"times": [now - i for i in range(n)], "last": 0}))
+
+
+def test_daily_limit_is_account_wide_rolling_24h(tmp_path, monkeypatch):
+    _write_state(tmp_path, 440)
     monkeypatch.setattr(ch, "fetch", _counting(lambda q: {"reactions": {"totalCount": 50}}))
     with pytest.raises(ch.CatHubBudgetError) as e:
         ch.reactions_from_dataset("X2026", request_budget=300)   # 50 > 450 - 440
-    assert "left today" in str(e.value)
-    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: pytest.fail("over the daily limit"))
-    (st / "cathub_requests.json").write_text(json.dumps({"date": _t.strftime("%Y-%m-%d"),
-                                                         "count": 450, "last": 0}))
+    assert "last 24 h" in str(e.value)
+    _write_state(tmp_path, 450)
     with pytest.raises(ch.CatHubBudgetError):
         ch._reserve_request()
+    import time as _t   # entries older than 24 h no longer count
+    (tmp_path / "state" / "cathub_requests.json").write_text(
+        json.dumps({"times": [_t.time() - 90000] * 450, "last": 0}))
+    ch._reserve_request()
+    assert ch.daily_requests_used() == 1
+
+
+def test_corrupt_state_resets(tmp_path):
+    st = tmp_path / "state"
+    st.mkdir(exist_ok=True)
+    for bad in ("[1, 2]", '{"times": "x", "last": "y"}', "not json"):
+        (st / "cathub_requests.json").write_text(bad)
+        ch._reserve_request()
+        assert ch.daily_requests_used() == 1
+
+
+def test_unwritable_state_dir_fails_closed(tmp_path, monkeypatch):
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o500)
+    monkeypatch.setenv("CATBENCH_STATE_DIR", str(ro / "sub"))
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: pytest.fail("must not send"))
+    try:
+        with pytest.raises(ch.CatHubBudgetError, match="CATBENCH_STATE_DIR"):
+            ch.fetch("{ x }")
+    finally:
+        ro.chmod(0o700)
+
+
+def test_cpu_torch_run_is_not_stamped_as_gpu(monkeypatch):
+    import sys
+    import types
+    from catbench.adsorption import AdsorptionCalculation
+    fake_torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True,
+                                                                  is_initialized=lambda: False))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.delitem(sys.modules, "tensorflow", raising=False)
+    monkeypatch.delitem(sys.modules, "jax", raising=False)
+    dev = AdsorptionCalculation([EMT()], mlip_name="M", benchmark="B")._device_info()
+    assert dev["type"] == "cpu" and dev["confirmed"] is True
 
 
 def test_incomplete_download_is_not_returned(monkeypatch):

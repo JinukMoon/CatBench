@@ -193,13 +193,15 @@ class AdsorptionCalculation:
                 "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
                 "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
         import sys as _sys
-        # Ask each framework that is actually loaded, then fall back to nvidia-smi for
-        # the GPU(s) this process was given. "source" says which answer was used.
+        # Ask each framework that is actually loaded. Only a framework that holds a
+        # GPU context confirms the device; nvidia-smi can only say which GPU the job
+        # was *given* (confirmed=False).
+        torch = _sys.modules.get("torch")
         try:
-            torch = _sys.modules.get("torch")
             if torch is not None and torch.cuda.is_available() and torch.cuda.is_initialized():
                 idx = torch.cuda.current_device()
-                info.update(name=torch.cuda.get_device_name(idx), type="cuda", source="torch")
+                info.update(name=torch.cuda.get_device_name(idx), type="cuda", source="torch",
+                            confirmed=True)
                 return info
         except Exception:
             pass
@@ -210,7 +212,7 @@ class AdsorptionCalculation:
                 if gpus:
                     det = tf.config.experimental.get_device_details(gpus[0])
                     info.update(name=det.get("device_name", "GPU (tensorflow)"), type="cuda",
-                                source="tensorflow")
+                                source="tensorflow", confirmed=True)
                     return info
         except Exception:
             pass
@@ -220,22 +222,33 @@ class AdsorptionCalculation:
                 devs = [d for d in jax.devices() if d.platform == "gpu"]
                 if devs:
                     info.update(name=getattr(devs[0], "device_kind", "GPU (jax)"), type="cuda",
-                                source="jax")
+                                source="jax", confirmed=True)
                     return info
         except Exception:
             pass
+        if torch is not None and not any(m in _sys.modules for m in ("tensorflow", "jax")):
+            # torch model that never opened a CUDA context -> it ran on the CPU
+            info.update(name="cpu (no CUDA context)", type="cpu", source="torch", confirmed=True)
+            return info
         try:
             import subprocess
-            out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                                 capture_output=True, text=True, timeout=20).stdout.strip().splitlines()
-            if out:
-                # nvidia-smi honours CUDA_VISIBLE_DEVICES, so these are this job's GPUs
-                info.update(name=out[0].strip(), type="cuda", source="nvidia-smi",
-                            n_visible=len(out))
-                return info
+            rows = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid,name", "--format=csv,noheader"],
+                                  capture_output=True, text=True, timeout=20).stdout.strip().splitlines()
+            gpus = [[c.strip() for c in r.split(",", 2)] for r in rows if r.count(",") >= 2]
+            vis = os.environ.get("CUDA_VISIBLE_DEVICES")
+            if gpus and vis not in (None, "", "-1", "NoDevFiles"):
+                first = vis.split(",")[0].strip()
+                # nvidia-smi ignores CUDA_VISIBLE_DEVICES: map index or UUID ourselves
+                match = [g for g in gpus if first in (g[0], g[1]) or g[1].startswith(first)]
+                if not match and len(gpus) == 1:
+                    match = gpus      # cgroup-restricted job: only its own GPU is listed
+                if match:
+                    info.update(name=match[0][2], type="cuda", source="nvidia-smi+CUDA_VISIBLE_DEVICES",
+                                confirmed=False)
+                    return info
         except Exception:
             pass
-        info.update(name="unknown (no GPU found)", type="unknown", source="none")
+        info.update(name="unknown (no GPU found)", type="unknown", source="none", confirmed=False)
         return info
 
     def _run_metadata(self):

@@ -41,37 +41,65 @@ _call_budget = [None]            # budget of the active cathub call (None = none
 _call_start = [0]                # _request_count at the start of that call
 
 
+def _state_dir():
+    return os.environ.get("CATBENCH_STATE_DIR", os.path.join(os.path.expanduser("~"), ".catbench"))
+
+
 def _state_path():
-    d = os.environ.get("CATBENCH_STATE_DIR", os.path.join(os.path.expanduser("~"), ".catbench"))
+    d = _state_dir()
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, "cathub_requests.json")
 
 
+_WINDOW = 86400.0   # rolling 24 h: independent of time zones and of CatHub's reset clock
+
+
 def _read_state(f):
+    """{"times": [request timestamps within the last 24 h], "last": float}. Anything
+    unreadable or of the wrong shape resets to an empty state."""
     f.seek(0)
     try:
         st = json.loads(f.read() or "{}")
     except ValueError:
         st = {}
-    today = time.strftime("%Y-%m-%d")
-    if st.get("date") != today:
-        st = {"date": today, "count": 0, "last": st.get("last", 0.0)}
+    if not isinstance(st, dict) or not isinstance(st.get("times"), list):
+        st = {"times": [], "last": st.get("last", 0.0) if isinstance(st, dict) else 0.0}
+    now = time.time()
+    st["times"] = [t for t in st["times"] if isinstance(t, (int, float)) and now - t < _WINDOW]
+    if not isinstance(st.get("last"), (int, float)):
+        st["last"] = 0.0
     return st
 
 
 def daily_requests_used():
-    """CatHub requests made today by every catbench process of this user."""
+    """CatHub requests made in the last 24 h by every catbench process of this user."""
     try:
         with open(_state_path(), "a+") as f:
-            return _read_state(f)["count"]
+            return len(_read_state(f)["times"])
     except OSError:
         return _request_count[0]
 
 
+def _lock(f, fcntl, timeout=120.0):
+    """flock with a timeout: a stopped/suspended lock holder must not hang every job."""
+    t0 = time.time()
+    while True:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.time() - t0 > timeout:
+                raise CatHubBudgetError(
+                    f"Could not lock the CatHub request log in {_state_dir()} for {timeout:.0f} s "
+                    f"(another catbench process holds it). Not sending the request.") from None
+            time.sleep(0.2)
+
+
 def _reserve_request():
     """Account-wide pacing: >= CATHUB_MIN_INTERVAL between requests and at most
-    CATHUB_DAILY_LIMIT per day across ALL local processes (file lock under
-    ~/.catbench), since CatHub's limits are per account, not per process."""
+    CATHUB_DAILY_LIMIT per rolling 24 h across ALL local processes (file lock under
+    ~/.catbench), since CatHub's limits are per account, not per process.
+    Fails closed: if the log cannot be written, no request is sent."""
     try:
         import fcntl
     except ImportError:          # no flock (Windows): per-process pacing only
@@ -79,20 +107,27 @@ def _reserve_request():
         if _last_request[0] and wait > 0:
             time.sleep(wait)
         return
-    with open(_state_path(), "a+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+    try:
+        f = open(_state_path(), "a+")
+    except OSError as e:
+        raise CatHubBudgetError(
+            f"Cannot write the CatHub request log in {_state_dir()} ({type(e).__name__}); "
+            f"set CATBENCH_STATE_DIR to a writable directory. Not sending the request.") from None
+    with f:
+        _lock(f, fcntl)
         try:
             st = _read_state(f)
-            if st["count"] >= CATHUB_DAILY_LIMIT:
+            if len(st["times"]) >= CATHUB_DAILY_LIMIT:
                 raise CatHubBudgetError(
-                    f"{st['count']} CatHub requests already made today by catbench on this account "
+                    f"{len(st['times'])} CatHub requests in the last 24 h by catbench on this account "
                     f"(local limit {CATHUB_DAILY_LIMIT}; CatHub suspends accounts above 500/day). "
-                    f"Try again tomorrow.")
-            wait = CATHUB_MIN_INTERVAL - (time.time() - float(st.get("last", 0.0)))
+                    f"Try again later.")
+            wait = CATHUB_MIN_INTERVAL - (time.time() - float(st["last"]))
             if wait > 0:
                 time.sleep(wait)
-            st["count"] += 1
-            st["last"] = time.time()
+            now = time.time()
+            st["times"].append(now)
+            st["last"] = now
             f.seek(0)
             f.truncate()
             f.write(json.dumps(st))
@@ -279,6 +314,8 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
     if request_budget is None:
         request_budget = (_call_budget[0] - (_request_count[0] - _call_start[0])
                           if _call_budget[0] is not None else CATHUB_DEFAULT_BUDGET)
+    if request_budget < 1:
+        raise CatHubBudgetError(f"No CatHub request budget left for {pub_id} (call budget used up).")
     start_count = _request_count[0]
 
     def used():
@@ -300,8 +337,8 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
     if needed - 1 > left_today:
         raise CatHubBudgetError(
             f"Downloading {pub_id} needs up to {needed - 1} more CatHub requests but only "
-            f"{left_today} are left today (local limit {CATHUB_DAILY_LIMIT}/day across all "
-            f"catbench processes; CatHub suspends accounts above 500/day). Try again tomorrow.")
+            f"{left_today} are left in the last 24 h (local limit {CATHUB_DAILY_LIMIT} across all "
+            f"catbench processes; CatHub suspends accounts above 500/day). Try again later.")
     if logger:
         logger.info(f"CatHub: {total_expected} reactions, ~{needed} requests planned "
                     f"(page_size={page_size}, budget={request_budget})")
