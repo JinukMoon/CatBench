@@ -407,3 +407,12 @@ def test_probe_retries_once_on_server_error(monkeypatch):
 
     monkeypatch.setattr(ch, "fetch", flaky)
     assert ch._count_reactions("X2026") == 7 and len(calls) == 2
+
+
+def test_version_single_value():
+    """pyproject.toml (read by publish.yml) and catbench/_version.py (stamped into results)
+    must never disagree."""
+    import re
+    root = os.path.dirname(os.path.dirname(__file__))
+    py = re.search(r'^version\s*=\s*"([^"]+)"', open(os.path.join(root, "pyproject.toml")).read(), re.M).group(1)
+    assert py == catbench.__version__
