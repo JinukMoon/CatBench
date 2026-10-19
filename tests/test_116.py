@@ -34,6 +34,16 @@ def test_cathub_api_moved_to_slac():
     assert "api.catalysis-hub.org" not in ch.GRAPHQL
 
 
+def test_no_key_message_blames_the_mirror_only_when_it_was_asked(tmp_path, monkeypatch):
+    from catbench.adsorption import cathub_preprocessing
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CATHUB_API_KEY", raising=False)
+    with pytest.raises(ch.CatHubAuthError) as e:
+        cathub_preprocessing("SomeDataset2026", source="cathub")       # mirror never consulted
+    msg = str(e.value)
+    assert "mirror" not in msg and "requires an API key" in msg and ch.CATHUB_KEY_URL in msg
+
+
 def test_calculator_head_is_read_from_the_calculator_not_the_name():
     from catbench.adsorption import AdsorptionCalculation
     # named OC20, but the calculator resolved to omat_pbe (the 2026-10 hub incident)

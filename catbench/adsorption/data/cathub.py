@@ -161,11 +161,15 @@ def _resolve_api_key(api_key=None):
     return env or None
 
 
-def _missing_key_message(tag, n_requests=None):
+def _missing_key_message(tag, n_requests=None, mirror_tried=False):
     need = f" This dataset needs about {n_requests} requests." if n_requests else ""
+    # 1.1.6: only blame the mirror when it was actually asked (not for source='cathub',
+    # a list of tags or non-default options).
+    why = (f"'{tag}' is not available from the catbench.org mirror, so it must be downloaded "
+           f"from CatHub, which now requires an API key:\n" if mirror_tried else
+           f"Downloading '{tag}' from CatHub requires an API key:\n")
     return (
-        f"'{tag}' is not available from the catbench.org mirror, so it must be downloaded "
-        f"from CatHub, which now requires an API key:\n"
+        why +
         f"  1) Get a key at {CATHUB_KEY_URL}\n"
         f"  2) export CATHUB_API_KEY=<your key>   (or pass api_key=... to cathub_preprocessing)\n"
         f"Note: CatHub allows 10 requests/minute and suspends accounts above 500 requests/day.{need}"
@@ -175,10 +179,10 @@ def _missing_key_message(tag, n_requests=None):
 class _cathub_session:
     """Set key + call-wide request budget for one public download call, restore after."""
 
-    def __init__(self, api_key=None, request_budget=CATHUB_DEFAULT_BUDGET, tag=None):
+    def __init__(self, api_key=None, request_budget=CATHUB_DEFAULT_BUDGET, tag=None, mirror_tried=False):
         key = _resolve_api_key(api_key)
         if key is None:
-            raise CatHubAuthError(_missing_key_message(tag or "this dataset"))
+            raise CatHubAuthError(_missing_key_message(tag or "this dataset", mirror_tried=mirror_tried))
         self.key, self.budget = key, request_budget
 
     def __enter__(self):
@@ -627,6 +631,7 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
     # --- 1.1.5: catbench.org mirror first -----------------------------------------
     default_options = (adsorbate_integration is None and require_constraints is True
                        and infer_fix_when_missing is True and fix_detect_tol == 1e-4)
+    mirror_tried = False
     if isinstance(benchmark, str) and source in ("auto", "mirror"):
         out_path = get_raw_data_path(benchmark)
         raw_cache = os.path.join(save_directory, f"{benchmark}.json")
@@ -658,6 +663,7 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
                     return
                 if source == "mirror":
                     raise FileNotFoundError(f"'{benchmark}' is not in the catbench.org mirror.")
+                mirror_tried = True
                 print(f"'{benchmark}' is not in the catbench.org mirror; downloading from CatHub.")
     elif not isinstance(benchmark, str) and source == "mirror":
         raise ValueError("source='mirror' supports a single dataset tag, not a list.")
@@ -669,7 +675,7 @@ def cathub_preprocessing(benchmark, adsorbate_integration=None, require_constrai
     out_exists = os.path.exists(get_raw_data_path(
         benchmark if isinstance(benchmark, str) else "multiple_tag"))
     if missing and not out_exists:
-        with _cathub_session(api_key, request_budget, tag=missing[0]):
+        with _cathub_session(api_key, request_budget, tag=missing[0], mirror_tried=mirror_tried):
             return _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,
                                               require_constraints, infer_fix_when_missing, fix_detect_tol)
     return _cathub_preprocessing_impl(benchmark, benchmarks, save_directory, adsorbate_integration,

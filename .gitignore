@@ -39,3 +39,7 @@ AGENTS.md
 
 # oh-my-claudecode (OMC)
 .omc/
+# D3 kernel JIT build by-products (torch cpp_extension, compiled into the package dir)
+catbench/dispersion/cuda/build.ninja
+catbench/dispersion/cuda/.ninja_*
+catbench/dispersion/cuda/*.cuda.o
