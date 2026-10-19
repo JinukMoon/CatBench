@@ -196,7 +196,8 @@ class AdsorptionCalculation:
             per_calc.append(parts[0] if len(parts) == 1 else {"components": parts})
         info = dict(per_calc[0]) if per_calc else {"class": "unknown"}
         if any(p != per_calc[0] for p in per_calc):
-            info["warning"] = "calculators differ in model/head/task"
+            # keep every identity, in calculator order: [a, b] and [a, c] must not collide
+            info = {"per_calculator": per_calc, "warning": "calculators differ in model/head/task"}
         self._calc_cache = info
         return info
 
@@ -307,8 +308,11 @@ class AdsorptionCalculation:
         meta = {"benchmark": self.benchmark,
                 "mode": self.mode,
                 "dispersion": self._dispersion_info(),
-                "calculator": self._calculator_info(),
+                "calculator": dict(self._calculator_info()),
                 "device": self._device_info()}
+        if getattr(self, "_inherited_unverified", 0):
+            # reactions resumed from a pre-1.1.6 file: their head/task is not known
+            meta["calculator"]["unverified_prior_reactions"] = self._inherited_unverified
         meta.update(getattr(self, "_input_meta", {}))
         return meta
     
@@ -366,9 +370,12 @@ class AdsorptionCalculation:
 
         # 1.1.5: refuse to resume a result written with a different dispersion setup
         # (mixing D3-on and D3-off reactions in one result file).
-        # 1.1.6: same for a different model head/task.
+        # 1.1.6: same for a different model head/task. Checked whenever the result file
+        # exists, not only when it holds reactions: a run whose reactions all failed still
+        # saved gas energies that a resumed run would reuse.
+        self._inherited_unverified = 0
         prev_path = os.path.join(save_directory, f"{self.mlip_name}_result.json")
-        if final_result and os.path.exists(prev_path):
+        if os.path.exists(prev_path):
             try:
                 with open(prev_path) as f:
                     prev_settings = json.load(f).get("calculation_settings", {}) or {}
@@ -384,14 +391,23 @@ class AdsorptionCalculation:
                         f"{prev}, but this run uses {cur}. Use a different mlip_name (e.g. a "
                         f"'_D3' suffix) or delete the old results.")
             prev_calc = prev_settings.get("calculator")
+            n_prev = sum(1 for k in final_result if not k.startswith("_") and k != "calculation_settings")
             if prev_calc is None:
-                print("Note: existing results carry no calculator stamp (written before 1.1.6); "
-                      "cannot check that they used the same model head/task as this run.")
-            elif prev_calc != self._calculator_info():
-                raise RuntimeError(
-                    f"Existing results in {save_directory} were computed with calculator "
-                    f"{prev_calc}, but this run uses {self._calculator_info()}. Use a different "
-                    f"mlip_name or delete the old results.")
+                # Reactions inherited from a pre-1.1.6 run keep "unverified" provenance:
+                # the stamp written by this run must not vouch for them.
+                self._inherited_unverified = n_prev
+                if n_prev:
+                    print(f"Note: {n_prev} existing reaction(s) carry no calculator stamp (written "
+                          "before 1.1.6); cannot check that they used the same model head/task as "
+                          "this run. They stay marked as unverified in the result file.")
+            else:
+                prev_calc = dict(prev_calc)
+                self._inherited_unverified = int(prev_calc.pop("unverified_prior_reactions", 0) or 0)
+                if prev_calc != self._calculator_info():
+                    raise RuntimeError(
+                        f"Existing results in {save_directory} were computed with calculator "
+                        f"{prev_calc}, but this run uses {self._calculator_info()}. Use a different "
+                        f"mlip_name or delete the old results.")
 
         # Structure-reuse cache (slab + adslab + single-point) — restart-safe
         # sibling file, loaded independently of the result file so an interrupted

@@ -51,6 +51,16 @@ def test_calculator_head_is_read_from_the_calculator_not_the_name():
     assert "warning" in mixed
 
 
+def test_differing_calculator_lists_do_not_collide():
+    """review 1.1.6 HIGH: [a, b] and [a, c] must give different stamps and cache signatures."""
+    from catbench.adsorption import AdsorptionCalculation
+    ab = AdsorptionCalculation([FakeMACE("omat_pbe"), FakeMACE("oc20_usemppbe")], mlip_name="M", benchmark="B")
+    ac = AdsorptionCalculation([FakeMACE("omat_pbe"), FakeMACE("matpes_r2scan")], mlip_name="M", benchmark="B")
+    assert ab._calculator_info() != ac._calculator_info()
+    assert ab._relax_sig() != ac._relax_sig()
+    assert [p["head"] for p in ab._calculator_info()["per_calculator"]] == ["omat_pbe", "oc20_usemppbe"]
+
+
 def test_structure_cache_is_not_shared_across_heads():
     from catbench.adsorption import AdsorptionCalculation
     a = AdsorptionCalculation([FakeMACE("omat_pbe")], mlip_name="M", benchmark="B")
@@ -89,6 +99,33 @@ def test_resume_of_pre_116_result_is_allowed_with_a_note(tmp_path, capsys):
     final, *_, cache = run._load_existing_results(str(d))
     assert "r1" in final and cache.get("k") == 1       # 1.1.5 run resumes, slabs not re-relaxed
     assert "no calculator stamp" in capsys.readouterr().out
+    # review 1.1.6 MEDIUM: the new stamp must not vouch for the inherited reaction ...
+    stamp = run._run_metadata()["calculator"]
+    assert stamp["unverified_prior_reactions"] == 1 and stamp["head"] == "omat_pbe"
+    # ... and the mark survives the next resume of the file this run writes
+    _old_result(d, {"dispersion": {"method": "none"}, "calculator": stamp})
+    again = AdsorptionCalculation([FakeMACE("omat_pbe")], mlip_name="M", benchmark="B")
+    again._load_existing_results(str(d))
+    assert again._run_metadata()["calculator"]["unverified_prior_reactions"] == 1
+    assert "unverified" in __import__("catbench.adsorption", fromlist=["AdsorptionAnalysis"]) \
+        .AdsorptionAnalysis._calculator_label(stamp)
+
+
+def test_failed_only_result_is_still_guarded(tmp_path):
+    """review 1.1.6 HIGH: a file holding only failures + gas energies must not be resumed
+    with another head (its gas energies would be reused)."""
+    from catbench.adsorption import AdsorptionCalculation
+    d = tmp_path / "result" / "M"
+    d.mkdir(parents=True)
+    (d / "M_result.json").write_text(json.dumps({
+        "calculation_settings": {"dispersion": {"method": "none"},
+                                 "calculator": {"class": "FakeMACE", "head": "omat_pbe"}},
+        "_failures": {"r1": {"error": "x", "stage": "relax:adslab"}}}))
+    (d / "M_gases.json").write_text(json.dumps({"H2gas": -6.7}))
+    (d / "M_gases_single_point.json").write_text("{}")
+    run = AdsorptionCalculation([FakeMACE("oc20_usemppbe")], mlip_name="M", benchmark="B")
+    with pytest.raises(RuntimeError, match="calculator"):
+        run._load_existing_results(str(d))
 
 
 def test_reaction_without_clean_slab_fails_with_a_reason_and_coverage_shows_calculator(tmp_path, monkeypatch):

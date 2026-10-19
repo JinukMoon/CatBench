@@ -705,8 +705,15 @@ class AdsorptionAnalysis:
             extra = " ".join(f"{k}={p[k]}" for k in ("head", "task_name", "modal") if p.get(k))
             return f"{p.get('class', '?')} {extra}".strip()
 
-        label = " + ".join(one(p) for p in stamp["components"]) if "components" in stamp else one(stamp)
-        return f"{label} (WARNING: {stamp['warning']})" if stamp.get("warning") else label
+        def ident(s):
+            return " + ".join(one(p) for p in s["components"]) if "components" in s else one(s)
+
+        label = " | ".join(ident(s) for s in stamp["per_calculator"]) if "per_calculator" in stamp else ident(stamp)
+        if stamp.get("warning"):
+            label += f" (WARNING: {stamp['warning']})"
+        if stamp.get("unverified_prior_reactions"):
+            label += f" ({stamp['unverified_prior_reactions']} reactions from a pre-1.1.6 run: head/task unverified)"
+        return label
 
     def _coverage_rows(self):
         """Per-MLIP success/failure counts from the loaded result files."""
