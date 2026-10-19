@@ -695,6 +695,19 @@ class AdsorptionAnalysis:
         except Exception:
             return None
 
+    @staticmethod
+    def _calculator_label(stamp):
+        """One-line view of the 1.1.6 calculator stamp, e.g. 'MACECalculator head=omat_pbe'."""
+        if not isinstance(stamp, dict):
+            return "unknown"
+
+        def one(p):
+            extra = " ".join(f"{k}={p[k]}" for k in ("head", "task_name", "modal") if p.get(k))
+            return f"{p.get('class', '?')} {extra}".strip()
+
+        label = " + ".join(one(p) for p in stamp["components"]) if "components" in stamp else one(stamp)
+        return f"{label} (WARNING: {stamp['warning']})" if stamp.get("warning") else label
+
     def _coverage_rows(self):
         """Per-MLIP success/failure counts from the loaded result files."""
         import collections
@@ -721,6 +734,7 @@ class AdsorptionAnalysis:
                 "Failed_by_stage": "; ".join(f"{k}: {v}" for k, v in stages.most_common()),
                 "catbench_version": settings.get("catbench_version", "unknown"),
                 "dispersion": (disp.get("method", "none") if isinstance(disp, dict) else str(disp)) if disp else "unknown",
+                "calculator": self._calculator_label(settings.get("calculator")),
                 "device": settings.get("device", {}).get("name", "unknown") if isinstance(settings.get("device"), dict) else "unknown",
                 "input_md5": settings.get("input_md5", "unknown"),
             })

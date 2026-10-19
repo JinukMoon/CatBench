@@ -148,7 +148,57 @@ class AdsorptionCalculation:
             # 1.1.5: D3 on/off (and its parameters) changes every relaxed energy, so a
             # cache written with a different dispersion setup must not be reused.
             json.dumps(self._dispersion_info(), sort_keys=True),
+            # 1.1.6: so does the model head/task of a multi-head model.
+            json.dumps(self._calculator_info(), sort_keys=True),
         ]
+
+    # Attributes through which multi-head/multi-task MLIP calculators expose the
+    # head they actually use: MACE (head, available_heads), fairchem UMA (task_name),
+    # SevenNet (modal).
+    _CALC_ID_ATTRS = ("head", "task_name", "modal")
+
+    def _calculator_info(self):
+        """Model calculator(s) and the head/task they actually use (1.1.6), read from the
+        calculator objects, not from mlip_name. Multi-head models can silently fall back
+        to a default head when given an unknown name (mace-torch 0.3.15: head='oc20' ->
+        'omat_pbe' with only a logging warning), so the resolved value is what is stamped."""
+        if getattr(self, "_calc_cache", None) is not None:
+            return self._calc_cache
+        per_calc = []
+        for calc in self.calculators:
+            parts = []
+            stack = [calc]
+            while stack:
+                c = stack.pop()
+                subs = getattr(c, "calcs", None) or getattr(getattr(c, "mixer", None), "calcs", None)
+                if subs:
+                    stack.extend(subs)
+                    continue
+                name = type(c).__name__
+                if "D3" in name.upper() or "DFTD" in name.upper():
+                    continue          # dispersion layer: stamped by _dispersion_info
+                part = {"class": name}
+                for attr in self._CALC_ID_ATTRS:
+                    try:
+                        v = getattr(c, attr, None)
+                    except Exception:
+                        v = None
+                    if isinstance(v, str) and v:
+                        part[attr] = v
+                try:
+                    heads = getattr(c, "available_heads", None)
+                except Exception:
+                    heads = None
+                if isinstance(heads, (list, tuple)) and len(heads) > 1 and all(isinstance(h, str) for h in heads):
+                    part["available_heads"] = list(heads)
+                parts.append(part)
+            parts.sort(key=lambda p: json.dumps(p, sort_keys=True))
+            per_calc.append(parts[0] if len(parts) == 1 else {"components": parts})
+        info = dict(per_calc[0]) if per_calc else {"class": "unknown"}
+        if any(p != per_calc[0] for p in per_calc):
+            info["warning"] = "calculators differ in model/head/task"
+        self._calc_cache = info
+        return info
 
     def _dispersion_info(self):
         """Dispersion correction actually attached to the calculators (introspected,
@@ -252,10 +302,12 @@ class AdsorptionCalculation:
         return info
 
     def _run_metadata(self):
-        """Extra calculation_settings stamps (1.1.5): input identity + real run setup."""
+        """Extra calculation_settings stamps (1.1.5): input identity + real run setup
+        (1.1.6: + the calculator's actual head/task)."""
         meta = {"benchmark": self.benchmark,
                 "mode": self.mode,
                 "dispersion": self._dispersion_info(),
+                "calculator": self._calculator_info(),
                 "device": self._device_info()}
         meta.update(getattr(self, "_input_meta", {}))
         return meta
@@ -314,13 +366,15 @@ class AdsorptionCalculation:
 
         # 1.1.5: refuse to resume a result written with a different dispersion setup
         # (mixing D3-on and D3-off reactions in one result file).
+        # 1.1.6: same for a different model head/task.
         prev_path = os.path.join(save_directory, f"{self.mlip_name}_result.json")
         if final_result and os.path.exists(prev_path):
             try:
                 with open(prev_path) as f:
-                    prev_disp = json.load(f).get("calculation_settings", {}).get("dispersion")
+                    prev_settings = json.load(f).get("calculation_settings", {}) or {}
             except Exception:
-                prev_disp = None
+                prev_settings = {}
+            prev_disp = prev_settings.get("dispersion")
             cur = {k: v for k, v in self._dispersion_info().items() if k != "calculator_classes"}
             if prev_disp is not None:
                 prev = {k: v for k, v in prev_disp.items() if k != "calculator_classes"}
@@ -329,6 +383,15 @@ class AdsorptionCalculation:
                         f"Existing results in {save_directory} were computed with dispersion "
                         f"{prev}, but this run uses {cur}. Use a different mlip_name (e.g. a "
                         f"'_D3' suffix) or delete the old results.")
+            prev_calc = prev_settings.get("calculator")
+            if prev_calc is None:
+                print("Note: existing results carry no calculator stamp (written before 1.1.6); "
+                      "cannot check that they used the same model head/task as this run.")
+            elif prev_calc != self._calculator_info():
+                raise RuntimeError(
+                    f"Existing results in {save_directory} were computed with calculator "
+                    f"{prev_calc}, but this run uses {self._calculator_info()}. Use a different "
+                    f"mlip_name or delete the old results.")
 
         # Structure-reuse cache (slab + adslab + single-point) — restart-safe
         # sibling file, loaded independently of the result file so an interrupted
@@ -352,6 +415,10 @@ class AdsorptionCalculation:
             # an interrupted 1.1.4 run must not re-relax every slab).
             if (isinstance(stored, list) and len(stored) == 4 and stored == current[:4]
                     and self._dispersion_info().get("method") == "none"):
+                stored = current
+            # Caches written by 1.1.5 carry no calculator entry; keep them when the rest
+            # matches, like the result file itself (which cannot be checked either).
+            if isinstance(stored, list) and len(stored) == 5 and stored == current[:5]:
                 stored = current
             if stored != current:
                 if structure_cache:
@@ -435,6 +502,13 @@ class AdsorptionCalculation:
         Returns:
             dict: Processing result containing reaction outcomes and calculations
         """
+        self._stage = "input"
+        # 1.1.6: say why instead of KeyError('star') deep in the single-point loop.
+        if "star" not in reaction_data.get("raw", {}):
+            raise ValueError(
+                f"Reaction {key} has no clean-slab ('star') structure. CatBench measures "
+                "adsorption relative to a clean surface; adsorbate-to-adsorbate steps such as "
+                "'C* + 0.5H2(g) -> CH*' are not supported.")
         # Get adsorbate indices from data - moved here for early access
         if "adsorbate_indices" not in reaction_data:
             raise KeyError(f"Missing 'adsorbate_indices' key in data for reaction {key}. "

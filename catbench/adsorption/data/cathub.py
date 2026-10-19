@@ -18,14 +18,17 @@ from ase.io import read
 from ase.constraints import FixAtoms
 from catbench.utils.io_utils import get_raw_data_directory, get_raw_data_path, save_json
 
-GRAPHQL = "https://api.catalysis-hub.org/graphql"
+# CatHub moved its API to SLAC in 2026-10 (api.catalysis-hub.org now answers POST with
+# 301 -> 405). CATHUB_API_URL overrides the base if it moves again.
+CATHUB_API = os.environ.get("CATHUB_API_URL", "https://api-catalysis-hub.slac.stanford.edu").rstrip("/")
+GRAPHQL = f"{CATHUB_API}/graphql"
 
 # Preprocessed CatHub datasets published by the CatBench team (same format that
 # cathub_preprocessing() writes). Tried first so most users never need a CatHub
 # API key and never touch CatHub's request limits. Override for testing/mirrors.
 MIRROR_URL = os.environ.get("CATBENCH_MIRROR_URL", "https://catbench.org/benchmark")
 
-CATHUB_KEY_URL = "https://api.catalysis-hub.org/auth/login"
+CATHUB_KEY_URL = f"{CATHUB_API}/auth/login"
 CATHUB_MAX_PAGE = 200            # server-side per-request row cap
 CATHUB_MIN_INTERVAL = 6.5        # s between requests (CatHub limit: 10/min)
 CATHUB_DEFAULT_BUDGET = 300      # requests per call (CatHub suspends accounts >500/day)

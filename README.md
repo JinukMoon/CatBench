@@ -124,7 +124,7 @@ when it has the dataset (no key needed) and downloads from CatHub only otherwise
 always downloads from CatHub.
 
 **CatHub API key (required since 2026).** CatHub now answers only requests that carry a
-personal API key. Get one at <https://api.catalysis-hub.org/auth/login>, then either
+personal API key. Get one at <https://api-catalysis-hub.slac.stanford.edu/auth/login>, then either
 
 ```bash
 export CATHUB_API_KEY=<your key>
@@ -306,6 +306,14 @@ The Excel workbook has three sheet types. Example numbers from the paper:
 | H | 1,247 | 89 | 0.891 | 0.234 | 89.3 | 93.4 |
 | OH | 1,156 | 124 | 1.045 | 0.298 | 82.7 | 87.1 |
 | ... | ... | ... | ... | ... | ... | ... |
+
+**Coverage** (v1.1.5+) — one row per MLIP: reactions in the input, succeeded, failed (with the stage
+where they failed) and not run, so an MLIP whose MAE covers only part of the dataset is visible. It also
+shows how each result was produced, read from the calculators rather than from the MLIP name: the
+catbench version, the dispersion correction, the GPU and (v1.1.6+) the `calculator` with the model head or
+task it actually used (e.g. `MACECalculator head=omat_pbe`, `FAIRChemCalculator task_name=oc20`). Check this
+column for multi-head models: mace-torch falls back to a default head, with only a logging warning, when
+given a head name the model does not have.
 
 </details>
 
