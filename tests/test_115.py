@@ -167,9 +167,12 @@ def test_budget_refused_before_download(monkeypatch):
 
     monkeypatch.setattr(ch, "fetch", _counting(fake_fetch))
     with pytest.raises(ch.CatHubBudgetError) as e:
-        ch.reactions_from_dataset("MamunHighT2019", request_budget=300)
+        ch.reactions_from_dataset("MamunHighT2019", request_budget=300, bulk=False)
     assert len(calls) == 1          # only the totalCount probe was spent
     assert "88588" in str(e.value)  # one request per reaction + 1 probe
+    with pytest.raises(ch.CatHubBudgetError) as e:   # 1.1.7 bulk: probe + 443 pages + 1
+        ch.reactions_from_dataset("MamunHighT2019", request_budget=300)
+    assert len(calls) == 2 and "445" in str(e.value)
 
 
 def test_pagination_stops_even_if_server_keeps_saying_next_page(monkeypatch):
@@ -188,7 +191,7 @@ def test_pagination_stops_even_if_server_keeps_saying_next_page(monkeypatch):
                               "pageInfo": {"hasNextPage": True, "endCursor": "c%d" % min(len(calls), 3)}}}
 
     monkeypatch.setattr(ch, "fetch", _counting(fake_fetch))
-    got = ch.reactions_from_dataset("ComerGeneralized2024", request_budget=400)
+    got = ch.reactions_from_dataset("ComerGeneralized2024", request_budget=400, bulk=False)
     assert len(got) == 325
     assert len(calls) == 3          # probe + 2 pages, not a loop to the budget
 
@@ -301,13 +304,15 @@ def test_budget_is_shared_across_a_list_of_tags(monkeypatch):
     def fake(query):
         if "first: 1)" in query:
             return {"reactions": {"totalCount": 200}}
+        if "publications(" in query:
+            return {"publications": {"edges": [{"node": {"pubId": "A2026", "systems": []}}]}}
         return {"reactions": {"totalCount": 200, "edges": [{"node": {"id": "x%d" % ch._request_count[0]}}],
                               "pageInfo": {"hasNextPage": True, "endCursor": "c%d" % ch._request_count[0]}}}
 
     monkeypatch.setattr(ch, "fetch", _counting(fake))
     monkeypatch.setenv("CATHUB_API_KEY", FAKE_KEY)
     with pytest.raises(ch.CatHubBudgetError):
-        ch.download(["A2026", "B2026"], request_budget=300)   # 201 + 201 > 300
+        ch.download(["A2026", "B2026"], request_budget=300)   # 1.1.7 bulk: 3 + then pages loop
 
 
 def _write_state(tmp_path, n):
@@ -320,9 +325,9 @@ def _write_state(tmp_path, n):
 
 def test_daily_limit_is_account_wide_rolling_24h(tmp_path, monkeypatch):
     _write_state(tmp_path, 440)
-    monkeypatch.setattr(ch, "fetch", _counting(lambda q: {"reactions": {"totalCount": 50}}))
+    monkeypatch.setattr(ch, "fetch", _counting(lambda q: {"reactions": {"totalCount": 5000}}))
     with pytest.raises(ch.CatHubBudgetError) as e:
-        ch.reactions_from_dataset("X2026", request_budget=300)   # 50 > 450 - 440
+        ch.reactions_from_dataset("X2026", request_budget=300)   # bulk 26 > 450 - 440
     assert "last 24 h" in str(e.value)
     _write_state(tmp_path, 450)
     with pytest.raises(ch.CatHubBudgetError):

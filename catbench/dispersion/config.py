@@ -21,21 +21,9 @@ DISPERSION_CONFIGS = {
         'vdw_cutoff': 9000,
         'cn_cutoff': 1600
     },
-    'scan': {
-        'damping_type': 'damp_bj',
-        'functional_name': 'scan',
-        'vdw_cutoff': 9000,
-        'cn_cutoff': 1600
-    },
-    'scan_zero': {
-        'damping_type': 'damp_zero',
-        'functional_name': 'scan',
-        'vdw_cutoff': 9000,
-        'cn_cutoff': 1600
-    },
     'b3lyp': {
         'damping_type': 'damp_bj',
-        'functional_name': 'b3lyp',
+        'functional_name': 'b3-lyp',   # the D3 table name ('b3lyp' is not in it)
         'vdw_cutoff': 9000,
         'cn_cutoff': 1600
     },
@@ -76,8 +64,6 @@ def get_dispersion_config(preset: str = 'default') -> Dict[str, Any]:
         preset: Name of the preset configuration. Available options:
             - 'default': BJ damping with PBE (recommended for most MLIPs)
             - 'zero_damping': Zero damping with PBE
-            - 'scan': BJ damping with SCAN functional
-            - 'scan_zero': Zero damping with SCAN functional
             - 'b3lyp': BJ damping with B3LYP functional
             - 'hse06': BJ damping with HSE06 functional
             - 'tpss': BJ damping with TPSS functional
@@ -92,8 +78,11 @@ def get_dispersion_config(preset: str = 'default') -> Dict[str, Any]:
     """
     if preset not in DISPERSION_CONFIGS:
         available = ', '.join(DISPERSION_CONFIGS.keys())
+        removed = (" The 'scan'/'scan_zero' presets were removed: the D3 kernel has no SCAN "
+                   "parameters, so they computed with unset damping parameters."
+                   if preset in ("scan", "scan_zero") else "")
         raise ValueError(
-            f"Unknown preset '{preset}'. Available presets: {available}"
+            f"Unknown preset '{preset}'. Available presets: {available}.{removed}"
         )
     
     return DISPERSION_CONFIGS[preset].copy()

@@ -301,69 +301,39 @@ def download_from_mirror(tag, dest_path, logger=None):
     return prov
 
 
-def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, request_budget=None):
-    """
-    Download reactions from CatHub dataset.
-    
-    Args:
-        pub_id: Publication ID or dataset tag
-        page_size: Number of reactions per page (CatHub caps it at 200)
-        logger: Logger instance for progress tracking
-        request_budget: Maximum CatHub requests this download may use. Default: what
-            is left of the active call's budget (cathub_preprocessing(request_budget=...)),
-            else CATHUB_DEFAULT_BUDGET. Checked against totalCount before downloading
-            and against today's account-wide usage; refused up front if too large.
-        
-    Returns:
-        List of reaction data
-    """
-    page_size = max(1, min(int(page_size), CATHUB_MAX_PAGE))
-    if request_budget is None:
-        request_budget = (_call_budget[0] - (_request_count[0] - _call_start[0])
-                          if _call_budget[0] is not None else CATHUB_DEFAULT_BUDGET)
-    if request_budget < 1:
-        raise CatHubBudgetError(f"No CatHub request budget left for {pub_id} (call budget used up).")
-    start_count = _request_count[0]
+def _fetch_with_budget(query, used, request_budget, pub_id, logger):
+    """fetch() + one retry for transient errors, never past the request budget."""
+    if used() >= request_budget:
+        raise CatHubBudgetError(f"Request budget ({request_budget}) exhausted while "
+                                f"downloading {pub_id}; nothing was saved.")
+    try:
+        return fetch(query)
+    except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status is not None and status < 500:
+            raise
+        if used() >= request_budget:
+            raise CatHubBudgetError(f"Request budget ({request_budget}) exhausted while "
+                                    f"downloading {pub_id}; nothing was saved.") from None
+        if logger:
+            logger.warning(f"CatHub request failed ({type(e).__name__}); retrying once.")
+        return fetch(query)   # one retry for transient server/network errors
 
-    def used():
-        return _request_count[0] - start_count
 
-    total_expected = _count_reactions(pub_id, logger)
-    # Measured 2026-09-23: a page that includes structures (InputFile) comes back
-    # with ONE reaction no matter what `first` asks for (without structures a page
-    # holds up to 200). Plan for the worst case: one request per reaction.
-    needed = 1 + total_expected
-    if needed > request_budget:
-        raise CatHubBudgetError(
-            f"Downloading {pub_id} from CatHub needs up to {needed} requests: CatHub returns "
-            f"structures one reaction per request ({total_expected} reactions). That is above "
-            f"the budget of {request_budget}; CatHub suspends accounts above 500 requests/day. "
-            f"Use the catbench.org mirror (source='auto'), or raise request_budget knowingly "
-            f"(at 10 requests/minute this takes about {needed // 10 + 1} minutes).")
-    left_today = CATHUB_DAILY_LIMIT - daily_requests_used()
-    if needed - 1 > left_today:
-        raise CatHubBudgetError(
-            f"Downloading {pub_id} needs up to {needed - 1} more CatHub requests but only "
-            f"{left_today} are left in the last 24 h (local limit {CATHUB_DAILY_LIMIT} across all "
-            f"catbench processes; CatHub suspends accounts above 500/day). Try again later.")
-    if logger:
-        logger.info(f"CatHub: {total_expected} reactions, ~{needed} requests planned "
-                    f"(page_size={page_size}, budget={request_budget})")
+def _page_reactions(pub_id, page_size, system_fields, total_expected, used, request_budget, logger):
+    """Cursor-page all reactions of a publication. `system_fields` selects what each
+    reaction system carries (structures or only their uniqueId)."""
     prev_cursor = None
     reactions = []
     seen_ids = set()
     has_next_page = True
     start_cursor = ""
-    page = 0
     total_count = None
     while has_next_page:
         # `order: "id"` enforces a stable total ordering for cursor pagination.
         # Without it, CatHub's default row order is not stable across pages, so
         # paging with `after: endCursor` silently returns some reactions twice and
         # skips an equal number -- yielding non-deterministic, incomplete downloads.
-        if used() >= request_budget:
-            raise CatHubBudgetError(f"Request budget ({request_budget}) exhausted while "
-                                    f"downloading {pub_id}; nothing was saved.")
         query = (
             f"""{{
       reactions(pubId: "{pub_id}", first: {page_size}, after: "{start_cursor}", order: "id") {{
@@ -384,9 +354,7 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
             reactionSystems {{
               name
               systems {{
-                energy
-                constraints
-                InputFile(format: "json")
+                {system_fields}
               }}
             }}
           }}
@@ -394,22 +362,9 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
       }}
     }}"""
         )
-        try:
-            data = fetch(query)
-        except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            if status is not None and status < 500:
-                raise
-            if used() >= request_budget:
-                raise CatHubBudgetError(f"Request budget ({request_budget}) exhausted while "
-                                        f"downloading {pub_id}; nothing was saved.") from None
-            if logger:
-                logger.warning(f"CatHub request failed ({type(e).__name__}); retrying once.")
-            data = fetch(query)   # one retry for transient server/network errors
+        data = _fetch_with_budget(query, used, request_budget, pub_id, logger)
         has_next_page = data["reactions"]["pageInfo"]["hasNextPage"]
         start_cursor = data["reactions"]["pageInfo"]["endCursor"]
-        page += 1
-
         total_count = data["reactions"]["totalCount"]
 
         # Dedup by CatHub reaction id as a safety net against any residual
@@ -451,7 +406,123 @@ def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, reque
         if logger:
             logger.error(msg)
         raise RuntimeError(msg)
+    return reactions
 
+
+_SYSTEM_FIELDS = 'energy\n                constraints\n                InputFile(format: "json")'
+
+
+def reactions_from_dataset(pub_id, page_size=CATHUB_MAX_PAGE, logger=None, request_budget=None,
+                           bulk=True):
+    """
+    Download reactions from CatHub dataset.
+
+    Args:
+        pub_id: Publication ID or dataset tag
+        page_size: Number of reactions per page (CatHub caps it at 200)
+        logger: Logger instance for progress tracking
+        request_budget: Maximum CatHub requests this download may use. Default: what
+            is left of the active call's budget (cathub_preprocessing(request_budget=...)),
+            else CATHUB_DEFAULT_BUDGET. Checked against totalCount before downloading
+            and against today's account-wide usage; refused up front if too large.
+        bulk: 1.1.7 (default). Page the reactions WITHOUT structures (up to 200 per
+            request) and take every structure of the publication from ONE
+            ``publications { systems { InputFile } }`` request, joined by system
+            uniqueId. A dataset then costs a few requests instead of one per reaction
+            (measured 2026-11-25: 5 publications / 511 reactions in 11 requests, output
+            identical to the per-reaction download). ``bulk=False`` is the 1.1.6 path.
+
+    Returns:
+        List of reaction data (each reaction system carries energy, constraints and
+        InputFile, the same in both modes)
+    """
+    page_size = max(1, min(int(page_size), CATHUB_MAX_PAGE))
+    if request_budget is None:
+        request_budget = (_call_budget[0] - (_request_count[0] - _call_start[0])
+                          if _call_budget[0] is not None else CATHUB_DEFAULT_BUDGET)
+    if request_budget < 1:
+        raise CatHubBudgetError(f"No CatHub request budget left for {pub_id} (call budget used up).")
+    start_count = _request_count[0]
+
+    def used():
+        return _request_count[0] - start_count
+
+    total_expected = _count_reactions(pub_id, logger)
+    if bulk:
+        # probe + reaction pages (no structures) + one publication-systems request
+        needed = 1 + -(-total_expected // page_size) + 1
+        how = (f"{total_expected} reactions in pages of {page_size} + one request for all "
+               f"structures of the publication")
+    else:
+        # Measured 2026-09-23: a page that includes structures (InputFile) comes back
+        # with ONE reaction no matter what `first` asks for (without structures a page
+        # holds up to 200). Plan for the worst case: one request per reaction.
+        needed = 1 + total_expected
+        how = (f"CatHub returns structures one reaction per request ({total_expected} "
+               f"reactions)")
+    if needed > request_budget:
+        raise CatHubBudgetError(
+            f"Downloading {pub_id} from CatHub needs up to {needed} requests: {how}. That is "
+            f"above the budget of {request_budget}; CatHub suspends accounts above 500 "
+            f"requests/day. Use the catbench.org mirror (source='auto'), or raise "
+            f"request_budget knowingly (at 10 requests/minute this takes about "
+            f"{needed // 10 + 1} minutes).")
+    left_today = CATHUB_DAILY_LIMIT - daily_requests_used()
+    if needed - 1 > left_today:
+        raise CatHubBudgetError(
+            f"Downloading {pub_id} needs up to {needed - 1} more CatHub requests but only "
+            f"{left_today} are left in the last 24 h (local limit {CATHUB_DAILY_LIMIT} across all "
+            f"catbench processes; CatHub suspends accounts above 500/day). Try again later.")
+    if logger:
+        logger.info(f"CatHub: {total_expected} reactions, ~{needed} requests planned "
+                    f"(page_size={page_size}, budget={request_budget}, bulk={bulk})")
+
+    if not bulk:
+        return _page_reactions(pub_id, page_size, _SYSTEM_FIELDS, total_expected,
+                               used, request_budget, logger)
+
+    reactions = _page_reactions(pub_id, page_size, "uniqueId", total_expected,
+                                used, request_budget, logger)
+    data = _fetch_with_budget(
+        f"""{{
+      publications(pubId: "{pub_id}") {{
+        edges {{
+          node {{
+            pubId
+            systems {{
+              uniqueId
+              {_SYSTEM_FIELDS}
+            }}
+          }}
+        }}
+      }}
+    }}""", used, request_budget, pub_id, logger)
+    edges = [e for e in data["publications"]["edges"] if e["node"].get("pubId") == pub_id]
+    if len(edges) != 1:
+        raise RuntimeError(f"CatHub returned {len(edges)} publications for pubId {pub_id}; "
+                           f"cannot match structures. Retry with bulk=False.")
+    systems = {s["uniqueId"]: s for s in (edges[0]["node"].get("systems") or [])
+               if s.get("uniqueId")}
+    missing = set()
+    for r in reactions:
+        for rs in r.get("reactionSystems") or []:
+            uid = (rs.get("systems") or {}).get("uniqueId")
+            s = systems.get(uid)
+            if s is None or not s.get("InputFile"):
+                missing.add(uid)
+                continue
+            rs["systems"] = {"energy": s.get("energy"), "constraints": s.get("constraints"),
+                             "InputFile": s["InputFile"]}
+    if missing:
+        msg = (f"{len(missing)} structure(s) used by {pub_id} reactions are not in the "
+               f"publication's systems list; not saving an incomplete dataset. Retry with "
+               f"bulk=False (one request per reaction).")
+        if logger:
+            logger.error(msg)
+        raise RuntimeError(msg)
+    if logger:
+        logger.info(f"Matched {len(systems)} publication structures to {len(reactions)} "
+                    f"reactions ({used()} requests)")
     return reactions
 
 

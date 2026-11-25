@@ -100,10 +100,12 @@ def test_resume_refuses_a_different_head(tmp_path):
 
 
 def test_resume_of_pre_116_result_is_allowed_with_a_note(tmp_path, capsys):
+    # 1.1.7: a multi-head model needs allow_unstamped_resume=True for this (see test_117)
     from catbench.adsorption import AdsorptionCalculation
     d = tmp_path / "result" / "M"
     _old_result(d, {"dispersion": {"method": "none"}})
-    run = AdsorptionCalculation([FakeMACE("omat_pbe")], mlip_name="M", benchmark="B")
+    run = AdsorptionCalculation([FakeMACE("omat_pbe")], mlip_name="M", benchmark="B",
+                                allow_unstamped_resume=True)
     old_sig = run._relax_sig()[:5]
     (d / "M_structure_cache.json").write_text(json.dumps({"__relax_config__": old_sig, "k": 1}))
     final, *_, cache = run._load_existing_results(str(d))
@@ -115,7 +117,7 @@ def test_resume_of_pre_116_result_is_allowed_with_a_note(tmp_path, capsys):
     # ... and the mark survives the next resume of the file this run writes
     _old_result(d, {"dispersion": {"method": "none"}, "calculator": stamp})
     again = AdsorptionCalculation([FakeMACE("omat_pbe")], mlip_name="M", benchmark="B")
-    again._load_existing_results(str(d))
+    again._load_existing_results(str(d))   # stamped now: no override needed
     assert again._run_metadata()["calculator"]["unverified_prior_reactions"] == 1
     assert "unverified" in __import__("catbench.adsorption", fromlist=["AdsorptionAnalysis"]) \
         .AdsorptionAnalysis._calculator_label(stamp)

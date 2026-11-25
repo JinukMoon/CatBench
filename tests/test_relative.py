@@ -53,3 +53,22 @@ def test_init_custom(empty_custom_json):
         EMT(), mlip_name="x", benchmark="demo", task_type="custom"
     )
     assert calc.task_type == "custom"
+
+
+def test_custom_target_written_with_its_own_forces(empty_custom_json, tmp_path):
+    """1.1.7: the shared calculator's results used to belong to the LAST reference when the
+    target was written -> broadcast error whenever reference and target sizes differ."""
+    from ase.build import bulk, molecule
+    from ase.io import read
+    calc = RelativeEnergyCalculation(EMT(), mlip_name="x", benchmark="demo", task_type="custom")
+    target = bulk("Cu", "fcc", a=3.6, cubic=True)                     # 4 atoms
+    o2 = molecule("O2"); o2.center(vacuum=5.0)                          # 2 atoms
+    data = {"target": {"atoms": target, "energy": -1.0},
+            "references": {"Cu": {"atoms": bulk("Cu", "fcc", a=3.6), "energy": -0.2},   # 1 atom
+                           "O2": {"atoms": o2, "energy": -0.5}},
+            "stoichiometry": {"target": 1, "Cu": -4, "O2": 0}, "normalization_factor": 1}
+    res = calc._calculate_formation_energy("sys", data, str(tmp_path))
+    t = read(tmp_path / "sys_target.extxyz")
+    assert len(t) == 4 and t.get_forces().shape == (4, 3)
+    assert t.get_potential_energy() == pytest.approx(res["mlip_calculation"]["target_energy"])
+    assert len(read(tmp_path / "sys_O2.extxyz")) == 2

@@ -80,16 +80,17 @@ class D3Calculator(Calculator):
     ) -> None:
         super().__init__(**kwargs)
 
+        # Checked before the kernel is loaded: an unknown functional made the kernel print
+        # an error and continue with unset damping parameters (arbitrary energies).
+        from catbench.dispersion.functionals import check_d3_functional
+        self.damp_name = damping_type.lower()
+        self.func_name = check_d3_functional(self.damp_name, functional_name)
+
         if not torch.cuda.is_available():
             raise NotImplementedError('CPU + D3 is not implemented yet')
 
         self.rthr = vdw_cutoff
         self.cnthr = cn_cutoff
-        self.damp_name = damping_type.lower()
-        self.func_name = functional_name.lower()
-
-        if self.damp_name not in ['damp_bj', 'damp_zero']:
-            raise ValueError('Error: Invalid damping type.')
 
         self._init_library()
 

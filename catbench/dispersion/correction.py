@@ -53,20 +53,23 @@ class DispersionCorrection:
             damping_type: Type of damping function. Options:
                 - 'damp_bj': Becke-Johnson damping (recommended)
                 - 'damp_zero': Zero damping
-            functional_name: DFT functional for D3 parameters. Options include:
+            functional_name: DFT functional for D3 parameters (names as in Grimme's dftd3), e.g.
                 - 'pbe': Perdew-Burke-Ernzerhof (default, most MLIPs)
-                - 'scan': Strongly constrained and appropriately normed
-                - 'b3lyp': B3LYP hybrid functional
-                - 'hse06': Heyd-Scuseria-Ernzerhof
-                - See VASP documentation for full list
+                - 'rpbe', 'pbesol', 'revpbe', 'tpss', 'hse06', 'pbe0'
+                - 'b3-lyp': B3LYP hybrid functional
+                Full list: catbench.dispersion.functionals.D3_FUNCTIONALS. SCAN/r2SCAN are not
+                included. An unsupported name raises ValueError.
             vdw_cutoff: van der Waals cutoff in au² (default: 9000 = 50.2 Å)
             cn_cutoff: Coordination number cutoff in au² (default: 1600 = 21.2 Å)
             **kwargs: Additional parameters passed to underlying D3Calculator
             
         Raises:
+            ValueError: If the damping type or functional has no D3 parameters
             ImportError: If D3Calculator cannot be imported
             RuntimeError: If CUDA is not available
         """
+        from catbench.dispersion.functionals import check_d3_functional
+        check_d3_functional(damping_type, functional_name)   # fail at construction, before any run
         self.damping_type = damping_type
         self.functional_name = functional_name
         self.vdw_cutoff = vdw_cutoff
@@ -145,7 +148,7 @@ class DispersionCorrection:
         
         Args:
             config: Either a string preset name or configuration dictionary.
-                Preset options: 'default', 'zero_damping', 'scan', 'b3lyp'
+                Preset options: 'default', 'zero_damping', 'b3lyp', 'hse06', 'tpss', 'large_system', 'conservative'
                 
         Returns:
             DispersionCorrection: Configured dispersion correction instance

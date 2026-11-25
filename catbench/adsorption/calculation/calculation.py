@@ -201,6 +201,18 @@ class AdsorptionCalculation:
         self._calc_cache = info
         return info
 
+    def _selects_head(self):
+        """True if a model calculator exposes a head/task/modal choice (1.1.7)."""
+        def walk(x):
+            if isinstance(x, dict):
+                if any(k in x for k in self._CALC_ID_ATTRS) or "available_heads" in x:
+                    return True
+                return any(walk(v) for v in x.values())
+            if isinstance(x, list):
+                return any(walk(v) for v in x)
+            return False
+        return walk(self._calculator_info())
+
     def _dispersion_info(self):
         """Dispersion correction actually attached to the calculators (introspected,
         not inferred from mlip_name). {"method": "none"} when no D3 layer is found."""
@@ -393,6 +405,17 @@ class AdsorptionCalculation:
             prev_calc = prev_settings.get("calculator")
             n_prev = sum(1 for k in final_result if not k.startswith("_") and k != "calculation_settings")
             if prev_calc is None:
+                # 1.1.7: a multi-head/multi-task model cannot be resumed from an unstamped
+                # result: the old run may have used another head (the 2026-10 hub ran
+                # MACE-MH-1 head='oc20', silently omat_pbe). Single-head models keep the
+                # 1.1.6 behaviour (resume, reactions marked unverified).
+                if self._selects_head() and not self.config.get("allow_unstamped_resume"):
+                    raise RuntimeError(
+                        f"Existing results in {save_directory} carry no calculator stamp (written "
+                        f"before 1.1.6), so it cannot be checked that they used the same model "
+                        f"head/task as this run ({self._calculator_info()}). Delete or move "
+                        f"{save_directory} and start fresh, or pass allow_unstamped_resume=True "
+                        f"if you know the old run used the same head.")
                 # Reactions inherited from a pre-1.1.6 run keep "unverified" provenance:
                 # the stamp written by this run must not vouch for them.
                 self._inherited_unverified = n_prev
@@ -434,7 +457,8 @@ class AdsorptionCalculation:
                 stored = current
             # Caches written by 1.1.5 carry no calculator entry; keep them when the rest
             # matches, like the result file itself (which cannot be checked either).
-            if isinstance(stored, list) and len(stored) == 5 and stored == current[:5]:
+            if (isinstance(stored, list) and len(stored) == 5 and stored == current[:5]
+                    and (not self._selects_head() or self.config.get("allow_unstamped_resume"))):
                 stored = current
             if stored != current:
                 if structure_cache:

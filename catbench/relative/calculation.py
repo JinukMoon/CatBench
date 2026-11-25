@@ -10,8 +10,15 @@ import json
 import traceback
 import numpy as np
 from ase.io import write
+from ase.calculators.calculator import all_properties
+from ase.calculators.singlepoint import SinglePointCalculator
 from catbench.utils.io_utils import get_result_directory, get_raw_data_path, save_json
 from catbench.utils.data_utils import load_catbench_json
+
+
+def _frozen(atoms, calculator):
+    """SinglePointCalculator holding the results the shared calculator just computed for atoms."""
+    return SinglePointCalculator(atoms, **{k: v for k, v in calculator.results.items() if k in all_properties})
 
 
 class RelativeEnergyCalculation:
@@ -221,14 +228,19 @@ class RelativeEnergyCalculation:
         target_atoms_calc = target_atoms.copy()
         target_atoms_calc.calc = self.calculator
         mlip_target_energy = target_atoms_calc.get_potential_energy()
-        
+        # Freeze this structure's results: the shared calculator's .results are
+        # overwritten by the reference calls below, and writing the target later
+        # attached the last reference's forces (shape mismatch if sizes differ).
+        target_atoms_calc.calc = _frozen(target_atoms_calc, self.calculator)
+
         # Reference calculations
         mlip_ref_energies = {}
         for ref_name, ref_data in references.items():
             ref_atoms_calc = ref_data["atoms"].copy()
             ref_atoms_calc.calc = self.calculator
             mlip_ref_energies[ref_name] = ref_atoms_calc.get_potential_energy()
-            
+            ref_atoms_calc.calc = _frozen(ref_atoms_calc, self.calculator)
+
             # Save reference structure directly in save_directory
             ref_file = os.path.join(save_directory, f"{system_name}_{ref_name}.extxyz")
             write(ref_file, ref_atoms_calc)

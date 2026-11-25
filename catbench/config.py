@@ -22,6 +22,9 @@ CALCULATION_DEFAULTS = {
     "n_crit_relax": 999,
     "damping": 1.0,
     "structure_cache": True,  # reuse a relaxed clean-slab result across frame-equivalent slabs (1.1.1)
+    # 1.1.7: resume a pre-1.1.6 result (no calculator stamp) with a multi-head/multi-task
+    # calculator anyway. Off by default: the old run may have used another head.
+    "allow_unstamped_resume": False,
 
     # Bond analysis
     "chemical_bond_cutoff": 6.0,  # Chemical bond cutoff in Å for max_bond_change calculation

@@ -140,10 +140,14 @@ cathub_preprocessing("NewDataset2026", source="cathub", api_key=os.environ["CATH
 ```
 
 **CatHub request limits.** CatHub allows 10 requests/minute and **suspends accounts above
-500 requests/day**, and it returns structures **one reaction per request**. CatBench spaces
-requests 6.5 s apart and refuses, before downloading, any dataset that would need more
-requests than `request_budget` (default 300). Large datasets such as MamunHighT2019
-(88,587 CatHub reactions) cannot be downloaded from CatHub in one day — use the mirror.
+500 requests/day**. A reaction page that includes structures comes back with only one
+reaction, so since v1.1.7 CatBench downloads in bulk: it pages the reactions *without*
+structures (200 per request) and takes every structure of the publication from a single
+request, matched by system id. A dataset costs about `2 + reactions/200` requests (e.g.
+240 reactions: 3 requests) instead of one per reaction; the result is identical.
+`reactions_from_dataset(..., bulk=False)` keeps the old one-request-per-reaction path.
+CatBench spaces requests 6.5 s apart and refuses, before downloading, any dataset that would
+need more requests than `request_budget` (default 300) or than are left of today's limit.
 
 Downloads are deterministic (stable `order: "id"` pagination + id-based dedup) and **fixed-atom constraints are handled automatically**: CatHub's deposited `constraints` are kept as-is, and for datasets where CatHub omits them the fixed set is **inferred from geometry** (clean slab vs adslab — atoms that do not move were held fixed) and injected as `FixAtoms`. A genuinely unconstrained slab is left free. So every preprocessed dataset is self-describing and runs correctly out of the box.
 
@@ -314,6 +318,10 @@ catbench version, the dispersion correction, the GPU and (v1.1.6+) the `calculat
 task it actually used (e.g. `MACECalculator head=omat_pbe`, `FAIRChemCalculator task_name=oc20`). Check this
 column for multi-head models: mace-torch falls back to a default head, with only a logging warning, when
 given a head name the model does not have.
+Since v1.1.7 a calculation with a multi-head/multi-task model (one that exposes `head`,
+`task_name` or `modal`) refuses to resume a result written before v1.1.6, because the old
+head cannot be checked: move the old `result/<mlip_name>` folder away and start fresh, or pass
+`allow_unstamped_resume=True` if you know the old run used the same head.
 
 </details>
 
@@ -460,6 +468,7 @@ Options are grouped into **Required**, **Commonly tuned**, and **Advanced** (col
 |---|---|---|
 | `damping` | Optimization damping factor. | 1.0 |
 | `structure_cache` | Reuse a relaxed clean-slab result across frame-equivalent slabs (and gas references) — large GPU savings on datasets with shared slabs (v1.1.1+). | True |
+| `allow_unstamped_resume` | Resume a result written before v1.1.6 (no calculator stamp) with a multi-head/multi-task model. Off by default because the old run may have used another head (v1.1.7+). | False |
 | `optimizer` | ASE optimizer: LBFGS / LBFGSLineSearch / BFGS / BFGSLineSearch / GPMin / MDMin / FIRE. | "LBFGS" |
 | `save_step` | Save interval for `result.json` during long runs. | 50 |
 | `chemical_bond_cutoff` | Cutoff distance for bond-change detection (A). | 6.0 |
@@ -516,7 +525,7 @@ Options are grouped into **Required**, **Commonly tuned**, and **Advanced** (col
 | Parameter | Description | Default |
 |---|---|---|
 | `damping_type` | `"damp_bj"` (Becke-Johnson, recommended) or `"damp_zero"`. | "damp_bj" |
-| `functional_name` | DFT functional for D3 parameters (pbe, scan, b3lyp, hse06, ...). | "pbe" |
+| `functional_name` | DFT functional for D3 parameters, names as in Grimme's dftd3 (pbe, rpbe, pbesol, b3-lyp, hse06, ...; full list `catbench.dispersion.functionals.D3_FUNCTIONALS`). SCAN/r2SCAN are not included; an unsupported name raises `ValueError`. | "pbe" |
 | `vdw_cutoff` | van der Waals cutoff (au^2). | 9000 |
 | `cn_cutoff` | Coordination number cutoff (au^2). | 1600 |
 

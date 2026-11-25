@@ -496,7 +496,7 @@ void PairD3::setfuncpar_bj() {
         case 13: rs6 = 0.383; s18 = 2.310; rs18 = 5.685; break;
         case 14: rs6 = 0.4309; s18 = 1.4760; rs18 = 3.9446; break;
         case 15: rs6 = 0.2076; s18 = 0.7257; rs18 = 6.3750; break;
-        case 16: rs6 = 0.3065; s18 = 0.9147; rs18 = 5.0570; break; s6 = 0.64;
+        case 16: rs6 = 0.3065; s18 = 0.9147; rs18 = 5.0570; s6 = 0.64; break;  // s6 used to sit after break (never set)
         case 17: rs6 = 0.0000; s18 = 0.2130; rs18 = 6.0519; s6 = 0.50; break;
         case 18: rs6 = 0.0009; s18 = 0.2112; rs18 = 5.9807; s6 = 0.50; break;
         case 19: rs6 = 0.4870; s18 = 3.2950; rs18 = 3.5043; break;

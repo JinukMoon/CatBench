@@ -8,6 +8,8 @@ The input and output variables are named based on the LAMMPS variables.
 #define LMP_PAIR_D3
 
 #include <cmath>
+#include <cstdio>  // fprintf in Error::all
+#include <cstdlib> // abort in Error::all
 #include <string>
 #include <vector> // for 'element_table'
 #include <algorithm> // for 'atomic_number'
@@ -78,8 +80,13 @@ public:
 
 class Error {
 public:
+    // Fatal, like LAMMPS' error->all. It used to only print, so an unknown functional or
+    // damping name carried on with unset parameters and gave arbitrary D3 energies.
+    // (catbench checks names in Python first; this is the backstop.)
     void all(int flerr, const char* message) {
-        printf("Error: %s\n", message);
+        fprintf(stderr, "catbench D3 fatal error: %s\n", message);
+        fflush(stderr);
+        abort();
     }
     Error() {}
     ~Error() {}
