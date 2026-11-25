@@ -36,10 +36,15 @@ def test_python_names_equal_the_kernel_tables(damping):
 
 @pytest.mark.parametrize("name", ["r2scan", "scan", "b3lyp", "not-a-functional"])
 def test_unknown_functional_raises_before_any_calculation(name):
-    from catbench.dispersion import DispersionCorrection
+    # the name check itself needs no torch ...
     with pytest.raises(ValueError) as e:
-        DispersionCorrection(functional_name=name)        # no torch/GPU needed to refuse
+        check_d3_functional("damp_bj", name)
     msg = str(e.value)
+    # ... and DispersionCorrection runs it before loading the kernel (needs torch installed)
+    pytest.importorskip("torch")
+    from catbench.dispersion import DispersionCorrection
+    with pytest.raises(ValueError):
+        DispersionCorrection(functional_name=name)
     if "scan" in name:
         assert "SCAN" in msg
     if name == "b3lyp":
