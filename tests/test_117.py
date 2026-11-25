@@ -94,3 +94,19 @@ def test_multi_head_drops_unstamped_structure_cache(tmp_path):
     (d / "M_structure_cache.json").write_text(json.dumps({"__relax_config__": run._relax_sig()[:5], "k": 1}))
     *_, cache = run._load_existing_results(str(d))
     assert cache == {}                                       # 1.1.5 cache: head unknown -> recompute
+
+
+class FakeSingleHeadMACE(EMT):   # mace-mpa-0: head='Default', one head
+    def __init__(self):
+        super().__init__()
+        self.available_heads = ["Default"]
+        self.head = "Default"
+
+
+def test_single_head_mace_still_resumes_unstamped(tmp_path):
+    from catbench.adsorption import AdsorptionCalculation
+    d = tmp_path / "result" / "M"
+    _old_result(d, {"dispersion": {"method": "none"}})
+    run = AdsorptionCalculation([FakeSingleHeadMACE()], mlip_name="M", benchmark="B")
+    final, *_ = run._load_existing_results(str(d))
+    assert "r1" in final

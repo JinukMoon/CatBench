@@ -202,10 +202,12 @@ class AdsorptionCalculation:
         return info
 
     def _selects_head(self):
-        """True if a model calculator exposes a head/task/modal choice (1.1.7)."""
+        """True if a model calculator exposes a real head/task/modal choice (1.1.7):
+        a task_name or modal, or several available heads. A single-head MACE model
+        (head='Default', one head) does not count."""
         def walk(x):
             if isinstance(x, dict):
-                if any(k in x for k in self._CALC_ID_ATTRS) or "available_heads" in x:
+                if "task_name" in x or "modal" in x or "available_heads" in x:
                     return True
                 return any(walk(v) for v in x.values())
             if isinstance(x, list):

@@ -318,8 +318,8 @@ catbench version, the dispersion correction, the GPU and (v1.1.6+) the `calculat
 task it actually used (e.g. `MACECalculator head=omat_pbe`, `FAIRChemCalculator task_name=oc20`). Check this
 column for multi-head models: mace-torch falls back to a default head, with only a logging warning, when
 given a head name the model does not have.
-Since v1.1.7 a calculation with a multi-head/multi-task model (one that exposes `head`,
-`task_name` or `modal`) refuses to resume a result written before v1.1.6, because the old
+Since v1.1.7 a calculation with a multi-head/multi-task model (several MACE heads, a fairchem
+`task_name` or a SevenNet `modal`) refuses to resume a result written before v1.1.6, because the old
 head cannot be checked: move the old `result/<mlip_name>` folder away and start fresh, or pass
 `allow_unstamped_resume=True` if you know the old run used the same head.
 
